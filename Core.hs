@@ -36,6 +36,8 @@ data Term
   | ProdInd Term Term | Fst Term | Snd Term
   | Nat | Zero | Suc Term
   | NatInd Term Term Term
+  | Id Term Term
+  | Cong Term Term | Refl Term | Sym Term | Trans Term Term
 
 data Nf
   = NfNe Ne
@@ -50,6 +52,8 @@ data Nf
   | NfProdInd Nf Nf
   | NfNat | NfZero | NfSuc Nf
   | NfNatInd Nf Nf Nf
+  | NfId Nf Nf Nf
+  | NfCong Nf Nf | NfRefl Nf | NfSym Nf | NfTrans Nf Nf
 
 data Ne
   = NeV String
@@ -109,7 +113,7 @@ needsParensNf :: Position -> Nf -> Bool
 needsParensNf p (NfNe n)      = needsParensNe p n
 needsParensNf p (NfLam _ _ _) = True
 needsParensNf p (NfPair _ _) = False
-needsParensNf InfixL (NfPi _ _ _)  = True -- x == "_" || x `notElem` freeVarsNf b
+needsParensNf InfixL (NfPi _ _ _)  = True
 needsParensNf InfixL (NfSigma _ _ _) = True
 needsParensNf InfixL (NfSuc n)     = needsParensNat (NfSuc n)
 needsParensNf p (NfSum _ _)   = True
@@ -120,6 +124,11 @@ needsParensNf p (NfEmptyInd _) = False
 needsParensNf p (NfSumInd _ _ _) = True
 needsParensNf p (NfProdInd _ _) = True
 needsParensNf p (NfNatInd _ _ _) = True
+needsParensNf p (NfId _ _ _) = True
+needsParensNf p (NfCong _ _) = True
+needsParensNf p (NfRefl _) = True
+needsParensNf p (NfSym _) = True
+needsParensNf p (NfTrans _ _) = True
 needsParensNf InfixL _             = False
 needsParensNf InfixR _             = False
 needsParensNf p    (NfS s)       = False
@@ -240,6 +249,11 @@ showNf (NfNatInd p z s) =
   -- withParensNf Arg p ++ " " ++
   -- withParensNf Arg z
   -- withParensNf Arg s
+showNf (NfId a s t)    = withParensNf InfixL s ++ " == " ++ withParensNf Arg t
+showNf (NfCong f p)  = "Cong " ++ withParensNf Arg f ++ " " ++ withParensNf Arg p
+showNf (NfRefl t)    = "Refl " ++ withParensNf Arg t
+showNf (NfSym p)     = "Sym " ++ withParensNf Arg p
+showNf (NfTrans p q) = "Trans " ++ withParensNf Arg p ++ " " ++ withParensNf Arg q
 
 showNe :: Ne -> String
 showNe (NeV x)     = x
@@ -333,7 +347,9 @@ alphaEqRenNf r (NfSigma x a s) (NfSigma y b t)
   | not (alphaEqRenNf r a b) = False
   | x == y                   = alphaEqRenNf r s t
   | otherwise                = alphaEqRenNf (insert x y r) s t
-alphaEqRenNf r (NfPair s t) (NfPair s' t') = alphaEqRenNf r s s' && alphaEqRenNf r t t'
+alphaEqRenNf r (NfPair s t) (NfPair s' t') =
+  alphaEqRenNf r s s' &&
+  alphaEqRenNf r t t'
 alphaEqRenNf r (NfProdInd p f) (NfProdInd p' f') =
   alphaEqRenNf r p p' &&
   alphaEqRenNf r f f'
@@ -344,6 +360,18 @@ alphaEqRenNf r (NfNatInd p z s) (NfNatInd p' z' s') =
   alphaEqRenNf r p p' &&
   alphaEqRenNf r z z' &&
   alphaEqRenNf r s s'
+alphaEqRenNf r (NfId a s t) (NfId a' s' t') =
+  alphaEqRenNf r a a' &&
+  alphaEqRenNf r s s' &&
+  alphaEqRenNf r t t'
+alphaEqRenNf r (NfCong f p) (NfCong f' p') =
+  alphaEqRenNf r f f' &&
+  alphaEqRenNf r p p'
+alphaEqRenNf r (NfRefl t) (NfRefl t') = alphaEqRenNf r t t'
+alphaEqRenNf r (NfSym p) (NfSym p') = alphaEqRenNf r p p'
+alphaEqRenNf r (NfTrans p q) (NfTrans p' q') =
+  alphaEqRenNf r p p' &&
+  alphaEqRenNf r q q'
 alphaEqRenNf r _ _ = False
 
 alphaEqRenNe :: Renaming -> Ne -> Ne -> Bool
@@ -412,6 +440,11 @@ renameNf x y NfZero = NfZero
 renameNf x y (NfSuc n) = NfSuc (renameNf x y n)
 renameNf x y (NfNatInd p z s) =
   NfNatInd (renameNf x y p) (renameNf x y z) (renameNf x y s)
+renameNf x y (NfId a s t) = NfId (renameNf x y a) (renameNf x y s) (renameNf x y t)
+renameNf x y (NfCong f p) = NfCong (renameNf x y f) (renameNf x y p)
+renameNf x y (NfRefl t) = NfRefl (renameNf x y t)
+renameNf x y (NfSym p) = NfSym (renameNf x y p)
+renameNf x y (NfTrans p q) = NfTrans (renameNf x y p) (renameNf x y q)
 
 renameNe :: String -> String -> Ne -> Ne
 renameNe x y (NeV s)
@@ -455,6 +488,12 @@ freeVarsNf (NfNatInd p z s) =
   freeVarsNf p `Set.union`
   freeVarsNf z `Set.union`
   freeVarsNf s
+freeVarsNf (NfId a s t) =
+  freeVarsNf a `Set.union` freeVarsNf s `Set.union` freeVarsNf t
+freeVarsNf (NfCong f t) = freeVarsNf f `Set.union` freeVarsNf t
+freeVarsNf (NfRefl s) = freeVarsNf s
+freeVarsNf (NfSym p) = freeVarsNf p
+freeVarsNf (NfTrans p q) = freeVarsNf p `Set.union` freeVarsNf q
 freeVarsNf _ = Set.empty
 
 freeVarsNe :: Ne -> Set.Set String
@@ -504,6 +543,12 @@ boundVarsNf (NfNatInd p z s) =
   boundVarsNf p `Set.union`
   boundVarsNf z `Set.union`
   boundVarsNf s
+boundVarsNf (NfId a s t) =
+  boundVarsNf a `Set.union` boundVarsNf s `Set.union` boundVarsNf t
+boundVarsNf (NfCong f t) = boundVarsNf f `Set.union` boundVarsNf t
+boundVarsNf (NfRefl s) = boundVarsNf s
+boundVarsNf (NfSym p) = boundVarsNf p
+boundVarsNf (NfTrans p q) = boundVarsNf p `Set.union` boundVarsNf q
 boundVarsNf _ = Set.empty
 
 boundVarsNe :: Ne -> Set.Set String
@@ -603,6 +648,11 @@ substNf x v (NfProdInd p f) = NfProdInd (substNf x v p) (substNf x v f)
 substNf x v (NfSuc n)   = NfSuc (substNf x v n)
 substNf x v (NfNatInd p z s) =
   NfNatInd (substNf x v p) (substNf x v z) (substNf x v s)
+substNf x v (NfId a s t) = NfId (substNf x v a) (substNf x v s) (substNf x v t)
+substNf x v (NfCong f t) = NfCong (substNf x v f) (substNf x v t)
+substNf x v (NfRefl t) = NfRefl (substNf x v t)
+substNf x v (NfSym p) = NfSym (substNf x v p)
+substNf x v (NfTrans p q) = NfTrans (substNf x v p) (substNf x v q)
 substNf x v t = t
 
 {-
@@ -699,6 +749,11 @@ data TypeCheckError
   | NotASum Nf
   | NotASigma Nf
   | NotAPi Nf
+  | NotAnArrow Nf
+  | NotAnId Nf
+  | NotAPair Nf
+  | NotEqual Nf Nf
+  | CannotInfer Nf
 
 instance Show TypeCheckError where
   show (NoAxiom s)      = "No axiom for the sort " ++ show s
@@ -712,22 +767,35 @@ instance Show TypeCheckError where
   show (NotASum a)      = "Type " ++ show a ++ " is not a sum type"
   show (NotASigma a)    = "Type " ++ show a ++ " is not a sigma type"
   show (NotAPi a)       = "Type " ++ show a ++ " is not a pi type"
+  show (NotAnArrow a)   = "Type " ++ show a ++ " is not an arrow type"
+  show (NotAnId a)      = "Type " ++ show a ++ " is not an identity type"
+  show (NotAPair a)     = "Term " ++ show a ++ " is not a pair"
+  show (NotEqual s t)   = "Terms " ++ show s ++ " and " ++ show t ++ " are not equal "
+  show (CannotInfer a)  = "Cannot infer the type of " ++ show a
 
-isType :: Nf -> Nf -> Either TypeCheckError Sort
-isType t (NfS s) = Right s
-isType t _       = Left (NotAType t)
+asType :: Nf -> Nf -> Either TypeCheckError Sort
+asType t (NfS s) = Right s
+asType t _       = Left (NotAType t)
 
-isSort :: Nf -> Either TypeCheckError Sort
-isSort (NfS s) = Right s
-isSort t       = Left (NotASort t)
+asSort :: Nf -> Either TypeCheckError Sort
+asSort (NfS s) = Right s
+asSort t       = Left (NotASort t)
 
-isPi :: Nf -> Either TypeCheckError (String, Nf, Nf)
-isPi (NfPi x a b) = Right (x, a, b)
-isPi t            = Left (NotAPi t)
+asPi :: Nf -> Either TypeCheckError (String, Nf, Nf)
+asPi (NfPi x a b) = Right (x, a, b)
+asPi t            = Left (NotAPi t)
 
-asPi :: Nf -> Nf -> Either TypeCheckError (String, Nf, Nf)
-asPi t (NfPi x a b) = Right (x, a, b)
-asPi t _            = Left (NotAFunction t)
+asFun :: Nf -> Nf -> Either TypeCheckError (String, Nf, Nf)
+asFun t (NfPi x a b) = Right (x, a, b)
+asFun t _            = Left (NotAFunction t)
+
+asArrow :: Nf -> Nf -> Either TypeCheckError (Nf, Nf)
+asArrow t (NfPi "_" a b) = Right (a, b)
+asArrow t (NfPi x a b)   =
+  if x `notElem` freeVarsNf b
+    then Right (a, b)
+    else Left (NotAnArrow (NfPi x a b))
+asArrow t _              = Left (NotAFunction t)
 
 asSum :: Nf -> Either TypeCheckError (Nf, Nf)
 asSum (NfSum a b) = Right (a, b)
@@ -736,6 +804,14 @@ asSum t           = Left (NotASum t)
 asSigma :: Nf -> Either TypeCheckError (String, Nf, Nf)
 asSigma (NfSigma x a b) = Right (x, a, b)
 asSigma t               = Left (NotASigma t)
+
+asPair :: Nf -> Nf -> Either TypeCheckError (String, Nf, Nf)
+asPair t (NfSigma x a b) = Right (x, a, b)
+asPair t _               = Left (NotAPair t)
+
+asId :: Nf -> Either TypeCheckError (Nf, Nf, Nf)
+asId (NfId a s t) = Right (a, s, t)
+asId t            = Left (NotAnId t)
 
 ofType :: Nf -> Nf -> Nf -> Either TypeCheckError ()
 ofType t a b = 
@@ -748,6 +824,196 @@ eqType a b =
   if a == b
     then Right ()
     else Left (NotEqType a b)
+
+areEqual :: Nf -> Nf -> Either TypeCheckError ()
+areEqual s t =
+  if s == t
+    then Right ()
+    else Left (NotEqual s t)
+
+getTypeNf :: Ctx -> Nf -> Either TypeCheckError Nf
+getTypeNf ctx (NfNe n) = getTypeNe ctx n
+getTypeNf ctx (NfS s) = case axioms s of
+  Nothing -> Left (NoAxiom s)
+  Just s' -> Right (NfS s')
+getTypeNf ctx (NfLam x a t) = getTypeNf (insert x a ctx) t
+getTypeNf ctx (NfPi x a b) = do
+  s1 <- getTypeNf ctx a
+  s1 <- asType a s1
+  s2 <- getTypeNf (insert x a ctx) b
+  s2 <- asType b s2
+  case rules s1 s2 of
+    Nothing -> Left (NoRule s1 s2)
+    Just s  -> Right (NfS s)
+getTypeNf ctx NfEmpty = Right (NfS (Type 0))
+getTypeNf ctx (NfEmptyInd p) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  Right (NfPi x NfEmpty $ p @@ var x)
+  where
+    x = freeNameCtx "e" ctx
+getTypeNf ctx NfUnit = Right (NfS (Type 0))
+getTypeNf ctx NfTT = Right NfUnit
+getTypeNf ctx (NfUnitInd p _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  Right (NfPi x NfUnit $ p @@ var x)
+  where
+    x = freeNameCtx "u" ctx
+getTypeNf ctx (NfSum a b) = do
+  s1 <- getSortNf ctx a
+  s2 <- getSortNf ctx b
+  case rules s1 s2 of
+    Nothing -> Left (NoRule s1 s2)
+    Just s  -> Right (NfS s)
+getTypeNf ctx (NfInl s b) = do
+  a <- getTypeNf ctx s
+  Right (NfSum a b)
+getTypeNf ctx (NfInr t a) = do
+  b <- getTypeNf ctx t
+  Right (NfSum a b)
+getTypeNf ctx (NfSumInd p _ _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  Right (NfPi x a $ p @@ var x)
+  where
+    x = freeNameCtx "s" ctx
+getTypeNf ctx (NfSigma x a b) = do
+  s1 <- getTypeNf ctx a
+  s1 <- asType a s1
+  s2 <- getTypeNf (insert x a ctx) b
+  s2 <- asType b s2
+  case rules s1 s2 of
+    Nothing -> Left (NoRule s1 s2)
+    Just s  -> Right (NfS s)
+getTypeNf ctx (NfPair a b) = Left (CannotInfer (NfPair a b))
+getTypeNf ctx (NfProdInd p _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  Right (NfPi x a $ p @@ var x)
+  where
+    x = freeNameCtx "p" ctx
+getTypeNf ctx NfNat = Right (NfS (Type 0))
+getTypeNf ctx NfZero = Right NfNat
+getTypeNf ctx (NfSuc _) = Right NfNat
+getTypeNf ctx (NfNatInd p _ _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  Right (NfPi x a $ p @@ var x)
+  where
+    x = freeNameCtx "n" ctx
+getTypeNf ctx (NfId a _ _) = do
+  s <- getSortNf ctx a
+  Right (NfS s)
+getTypeNf ctx (NfCong f p) = do
+  p          <- getTypeNf ctx p
+  (a, x, y)  <- asId p
+  t          <- getTypeNf ctx f
+  (_, _, b)  <- asFun f t
+  Right (NfId b (f @@ x) (f @@ y))
+getTypeNf ctx (NfRefl t) = do
+  a <- getTypeNf ctx t
+  Right (NfId a t t)
+getTypeNf ctx (NfSym p) = do
+  t <- getTypeNf ctx p
+  (a, x, y) <- asId t
+  Right (NfId a y x)
+getTypeNf ctx (NfTrans p q) = do
+  t <- getTypeNf ctx p
+  (a, x, _) <- asId t
+  t <- getTypeNf ctx q
+  (_, _, z) <- asId t
+  Right (NfId a x z)
+
+
+getTypeNe :: Ctx -> Ne -> Either TypeCheckError Nf
+getTypeNe ctx (NeV x) = case lookup x ctx of
+  Nothing -> Left (NotInCtx x)
+  Just a  -> Right a
+getTypeNe ctx (NeApp n t) = do
+  t         <- getTypeNe ctx n
+  (x, a, b) <- asFun (NfNe n) t
+  Right (substNf x t b)
+getTypeNe ctx (NeEmptyInd p n) = Right (p @@ NfNe n)
+getTypeNe ctx (NeUnitInd p _ n) = Right (p @@ NfNe n)
+getTypeNe ctx (NeSumInd p _ _ n) = Right (p @@ NfNe n)
+getTypeNe ctx (NeProdInd p _ n) = Right (p @@ NfNe n)
+getTypeNe ctx (NeNatInd p _ _ n) = Right (p @@ NfNe n)
+getTypeNe ctx (NeFst n) = do
+  t         <- getTypeNe ctx n
+  (x, a, b) <- asSigma t
+  Right a
+getTypeNe ctx (NeSnd n) = do
+  t         <- getTypeNe ctx n
+  (x, a, b) <- asSigma t
+  Right (b @@ NfNe (NeFst n))
+
+getSortNf :: Ctx -> Nf -> Either TypeCheckError Sort
+getSortNf ctx (NfNe n) = getSortNe ctx n
+getSortNf ctx (NfS s) = case axioms s of
+  Nothing -> Left (NoAxiom s)
+  Just s' -> Right s'
+getSortNf ctx (NfPi x a b) = do
+  s1 <- getSortNf ctx a
+  s2 <- getSortNf (insert x a ctx) b
+  case rules s1 s2 of
+    Nothing -> Left (NoRule s1 s2)
+    Just s  -> Right s
+getSortNf ctx (NfSum a b) = do
+  s1 <- getSortNf ctx a
+  s2 <- getSortNf ctx b
+  case rules s1 s2 of
+    Nothing -> Left (NoRule s1 s2)
+    Just s  -> Right s
+getSortNf ctx (NfSigma x a b) = do
+  s1 <- getSortNf ctx a
+  s2 <- getSortNf (insert x a ctx) b
+  case rules s1 s2 of
+    Nothing -> Left (NoRule s1 s2)
+    Just s  -> Right s
+getSortNf ctx NfEmpty = Right (Type 0)
+getSortNf ctx NfUnit = Right (Type 0)
+getSortNf ctx NfNat = Right (Type 0)
+getSortNf ctx (NfId a s t) = getSortNf ctx a
+getSortNf ctx t = Left (NotAType t)
+
+getSortNe :: Ctx -> Ne -> Either TypeCheckError Sort
+getSortNe ctx (NeV x) = case lookup x ctx of
+  Nothing      -> Left (NotInCtx x)
+  Just (NfS s) -> Right s
+  Just _       -> Left (NotAType (NfNe (NeV x)))
+getSortNe ctx (NeApp n _) = do
+  a         <- getTypeNe ctx n
+  (x, a, b) <- asFun (NfNe n) a
+  asSort b
+getSortNe ctx (NeEmptyInd p _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  asSort b
+getSortNe ctx (NeUnitInd p _ _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  asSort b
+getSortNe ctx (NeSumInd p _ _ _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  asSort b
+getSortNe ctx (NeProdInd p _ _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  asSort b
+getSortNe ctx (NeNatInd p _ _ _) = do
+  a         <- getTypeNf ctx p
+  (x, a, b) <- asFun p a
+  asSort b
+getSortNe ctx (NeFst n) = do
+  a         <- getTypeNe ctx n
+  (x, a, b) <- asPair (NfNe n) a
+  asSort a
+getSortNe ctx (NeSnd n) = do
+  a         <- getTypeNe ctx n
+  (x, a, b) <- asPair (NfNe n) a
+  asSort b
 
 {-
 Combined type-checker and normalizer
@@ -770,10 +1036,10 @@ eval env ctx (V x) = case lookup x ctx of
 eval env ctx (Pi x a b) = do
   -- C ⊢ A : Type i
   (a, s1) <- eval env ctx a
-  s1      <- isType a s1
+  s1      <- asType a s1
   -- C, x : A ⊢ B : Type j
   (b, s2) <- eval env (insert x a ctx) b
-  s2      <- isType b s2
+  s2      <- asType b s2
   case rules s1 s2 of
     -- C ⊢ (x : A) -> B : Type (max i j)
     Just s  -> Right (NfPi x a b, NfS s)
@@ -781,7 +1047,7 @@ eval env ctx (Pi x a b) = do
 eval env ctx (Lam x a t) = do
   -- C ⊢ A : Type i
   (a, s1) <- eval env ctx a
-  s1      <- isType a s1
+  s1      <- asType a s1
   -- C, x : A ⊢ t : B
   (t, b)  <- eval env (insert x a ctx) t
   -- C ⊢ \(x : A).t : (x : A) -> B
@@ -789,7 +1055,7 @@ eval env ctx (Lam x a t) = do
 eval env ctx (App f t) = do
   -- C ⊢ f : (x : A) -> B
   (f, p)    <- eval env ctx f
-  (x, a, b) <- asPi f p
+  (x, a, b) <- asFun f p
    -- C ⊢ t : A
   (t, a')   <- eval env ctx t
   _         <- ofType t a' a
@@ -799,9 +1065,9 @@ eval env ctx Empty = Right (NfEmpty, type0) -- C ⊢ Empty : Type 0
 eval env ctx (EmptyInd p) = do
   -- C ⊢ P : Empty -> Type i
   (p, t)    <- eval env ctx p
-  (_, a, s) <- asPi p t
+  (_, a, s) <- asFun p t
   _         <- eqType a NfEmpty
-  _         <- isSort s
+  _         <- asSort s
   -- C ⊢ EmptyInd P : (e : Empty) -> P e
   e         <- return $ freeName "e" env ctx
   Right (NfEmptyInd p, NfPi e NfEmpty (p @@ var e))
@@ -810,9 +1076,9 @@ eval env ctx TT    = Right (NfTT, NfUnit) -- C ⊢ tt : Unit
 eval env ctx (UnitInd p ptt) = do
   -- C ⊢ P : Unit -> Type i
   (p, t)    <- eval env ctx p
-  (_, a, s) <- asPi p t
+  (_, a, s) <- asFun p t
   _         <- eqType a NfUnit
-  _         <- isSort s
+  _         <- asSort s
   -- C ⊢ Ptt : P tt
   (ptt, t)  <- eval env ctx ptt
   _         <- ofType ptt t (p @@ NfTT)
@@ -822,10 +1088,10 @@ eval env ctx (UnitInd p ptt) = do
 eval env ctx (Sum a b) = do
   -- C ⊢ A : Type i
   (a, s1) <- eval env ctx a
-  s1      <- isType a s1
+  s1      <- asType a s1
   -- C ⊢ B : Type j
   (b, s2) <- eval env ctx b
-  s2      <- isType b s2
+  s2      <- asType b s2
   case rules s1 s2 of
     -- C ⊢ A + B : Type (max i j)
     Just s  -> Right (NfSum a b, NfS s)
@@ -835,7 +1101,7 @@ eval env ctx (Inl t b) = do
   (t, a) <- eval env ctx t
   -- C ⊢ B : Type i
   (b, s) <- eval env ctx b
-  s      <- isType b s
+  s      <- asType b s
   -- C ⊢ inl t : A + B
   Right (NfInl t b, NfSum a b)
 eval env ctx (Inr t a) = do
@@ -843,23 +1109,23 @@ eval env ctx (Inr t a) = do
   (t, b) <- eval env ctx t
   -- C ⊢ A : Type i
   (a, s) <- eval env ctx a
-  s      <- isType a s
+  s      <- asType a s
   -- C ⊢ inr t : A + B
   Right (NfInl t a, NfSum a b)
 eval env ctx (SumInd p f g) = do
   -- C ⊢ P : A + B -> Type i
   (p, t)     <- eval env ctx p
-  (_, t, s)  <- asPi p t
+  (_, t, s)  <- asFun p t
   (a, b)     <- asSum t
-  _          <- isSort s
+  _          <- asSort s
   -- C ⊢ f : (x : A) -> P (inl x)
   (f, t)     <- eval env ctx f
-  (x, a', t) <- asPi f t
+  (x, a', t) <- asFun f t
   _          <- eqType a' a
   _          <- eqType t (p @@ NfInl b (var x))
   -- C ⊢ g : (y : B) -> P (inr y)
   (g, t)     <- eval env ctx g
-  (y, b', t) <- asPi f t
+  (y, b', t) <- asFun f t
   _          <- eqType b' b
   _          <- eqType t (p @@ NfInl a (var y))
   s          <- return $ freeName "s" env ctx
@@ -868,10 +1134,10 @@ eval env ctx (SumInd p f g) = do
 eval env ctx (Sigma x a b) = do
   -- C ⊢ A : Type i
   (a, s1) <- eval env ctx a
-  s1      <- isType a s1
+  s1      <- asType a s1
   -- C, x : A ⊢ B : Type j
   (b, s2) <- eval env (insert x a ctx) b
-  s2      <- isType b s2
+  s2      <- asType b s2
   case rules s1 s2 of
     -- C ⊢ [x : A] B : Type (max i j)
     Just s  -> Right (NfSigma x a b, NfS s)
@@ -881,7 +1147,7 @@ eval env ctx (Pair x b s t) = do
   (s, a) <- eval env ctx s
   -- C, x : A ⊢ B : Type i
   (b, s2) <- eval env (insert x a ctx) b
-  s2      <- isType b s2
+  s2      <- asType b s2
   -- C ⊢ t : B[s/x]
   (t, bs) <- eval env ctx t
   _       <- ofType t bs (substNf x s b)
@@ -890,14 +1156,14 @@ eval env ctx (Pair x b s t) = do
 eval env ctx (ProdInd p f) = do
   -- C ⊢ P : [x : A] B -> Type i
   (p, t)     <- eval env ctx p
-  (_, t, s)  <- asPi p t
+  (_, t, s)  <- asFun p t
   (x, a, b)  <- asSigma t
-  _          <- isSort s
+  _          <- asSort s
   -- C ⊢ f : (y : A) (z : B x) -> P (y,z)
   (f, t)     <- eval env ctx f
-  (y, a', t) <- asPi f t
+  (y, a', t) <- asFun f t
   _          <- eqType a' a
-  (z, b', t) <- isPi t
+  (z, b', t) <- asPi t
   _          <- eqType b' (renameNf y x b)
   _          <- eqType t (p @@ NfPair (var y) (var z))
   s          <- return $ freeName "s" env ctx
@@ -914,17 +1180,58 @@ eval env ctx (Suc n) = do
 eval env ctx (NatInd p z s) = do
   -- C ⊢ P : Nat -> Type i
   (p, t)     <- eval env ctx p
-  (_, t, s1) <- asPi p t
+  (_, t, s1) <- asFun p t
   _          <- eqType t NfNat
-  _          <- isSort s1
+  _          <- asSort s1
   -- C ⊢ z : P zero
   (z, t)     <- eval env ctx z
   _          <- eqType t (p @@ NfZero)
   -- C ⊢ s : (x : Nat) -> P x -> P (suc x)
   (s, t)     <- eval env ctx s
-  (x, b', t) <- asPi s t
+  (x, b', t) <- asFun s t
   _          <- eqType b' NfNat
   _          <- eqType t (p @@ var x ==> p @@ NfSuc (var x))
   n          <- return $ freeName "n" env ctx
   -- C ⊢ NatInd P z s : (n : Nat) -> P n
   Right (NfNatInd p z s, NfPi n NfNat (p @@ var n))
+eval env ctx (Id x y) = do
+  -- C ⊢ x : A
+  (x, a)  <- eval env ctx x
+  -- C ⊢ A : Type i
+  s       <- getSortNf ctx a
+  -- C ⊢ y : A
+  (y, a') <- eval env ctx y
+  _       <- ofType y a' a
+  -- C ⊢ x == y : Type i
+  Right (NfId a x y, NfS s)
+eval env ctx (Cong f p) = do
+  -- C ⊢ f : A -> B
+  (f, t) <- eval env ctx f
+  (a, b) <- asArrow f t
+  -- C ⊢ p : x == y
+  (p, t)     <- eval env ctx p
+  (a', x, y) <- asId t
+  _          <- eqType a a'
+  -- C ⊢ Cong f p : f x == f y
+  Right (NfCong f p, NfId b (f @@ x) (f @@ y))
+eval env ctx (Refl x) = do
+  -- C ⊢ x : A
+  (x, a) <- eval env ctx x
+  -- C ⊢ Refl x : x == x
+  Right (NfRefl x, NfId a x x)
+eval env ctx (Sym p) = do
+  -- C ⊢ p : x == y
+  (p, t) <- eval env ctx p
+  (a, x, y) <- asId t
+  -- C ⊢ Sym p : y == x
+  Right (NfSym p, NfId a y x)
+eval env ctx (Trans p q) = do
+  -- C ⊢ p : x == y
+  (p, t) <- eval env ctx p
+  (a, x, y) <- asId t
+  -- C ⊢ q : y == z
+  (q, t) <- eval env ctx q
+  (_, y', z) <- asId t
+  _          <- areEqual y y'
+  -- C ⊢ Trans p q : x == z
+  Right (NfTrans p q, NfId a x z)

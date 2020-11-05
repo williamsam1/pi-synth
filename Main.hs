@@ -98,11 +98,11 @@ notTm :: Nf
 notTm = boolRec boolTy trueTm falseTm
 
 {-
-NotInvol = (x : Bool) -> Eq (not (not x)) x
+NotInvol = (x : Bool) -> not (not x) == x
 -}
 notInvolTy :: Nf
-notInvolTy = 
-  NfPi "x" boolTy $ boolEq @@ (notTm @@ (notTm @@ var "x")) @@ var "x"
+notInvolTy = NfPi "x" boolTy $ boolEq @@ (notTm @@ (notTm @@ var "x")) @@ var "x"
+  --NfPi "x" boolTy $ NfId boolTy (notTm @@ (notTm @@ var "x")) (var "x")
 
 {-
 NatRec : (A : Type) -> A -> (Nat -> A -> A) -> Nat -> A
@@ -298,6 +298,8 @@ numeral i = NfSuc (numeral (i-1))
 
 types :: [Nf]
 types =
+    -- [curryTy, uncurryTy, contrapos, compose, depCompose,
+    --  notInvolTy]
   [curryTy, uncurryTy, contrapos, compose, depCompose,
    notInvolTy, plusZero, natDiscrete, isEven (numeral 100),
    isEvenPlusTwo]
@@ -307,7 +309,7 @@ ctx = empty
 
 doSynth :: Nf -> IO Nf
 doSynth t = do
-  putStrLn $ show (toList ctx) ++ " ⊢ ? : " ++ show t
+  putStrLn $ showCtx ctx ++ " ⊢ ? : " ++ show t
   t <- timeIt (return $ head $ synthAll ctx t)
   putStrLn ""
   return t

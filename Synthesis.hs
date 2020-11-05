@@ -45,7 +45,7 @@ synthSpinesHelper s ctx ((n, t, s1):xs) =
 synthSpines :: Int -> Ctx -> [(Ne, Nf)]
 synthSpines s ctx = synthSpinesHelper s ctx [(NeV x, t, 0) | (x, t) <- toList ctx]
 
--- Context-guided search (spines)
+-- Context-guided search (neutral forms)
 synthCtx :: Int -> Ctx -> Nf -> [Nf]
 synthCtx s ctx a = [NfNe n | (n, t) <- synthSpines s ctx, t == a]
 
