@@ -101,8 +101,9 @@ notTm = boolRec boolTy trueTm falseTm
 NotInvol = (x : Bool) -> not (not x) == x
 -}
 notInvolTy :: Nf
-notInvolTy = NfPi "x" boolTy $ boolEq @@ (notTm @@ (notTm @@ var "x")) @@ var "x"
-  --NfPi "x" boolTy $ NfId boolTy (notTm @@ (notTm @@ var "x")) (var "x")
+notInvolTy =
+  -- NfPi "x" boolTy $ boolEq @@ (notTm @@ (notTm @@ var "x")) @@ var "x"
+  NfPi "x" boolTy $ NfId boolTy (notTm @@ (notTm @@ var "x")) (var "x")
 
 {-
 NatRec : (A : Type) -> A -> (Nat -> A -> A) -> Nat -> A
@@ -163,7 +164,9 @@ plusTm =
 plusZero :: Nf
 plusZero =
   NfPi "n" NfNat $
-  eqNat @@ (plusTm @@ var "n" @@ NfZero) @@ var "n"
+  NfId NfNat (plusTm @@ var "n" @@ NfZero) (var "n")
+  -- NfPi "n" NfNat $
+  -- eqNat @@ (plusTm @@ var "n" @@ NfZero) @@ var "n"
 
 -- (m n : Nat) -> Eq (plus m n) (plus n m)
 {-
@@ -186,7 +189,8 @@ plusComm :: Nf
 plusComm =
   NfPi "m" NfNat $
   NfPi "n" NfNat $
-  eqNat @@ (plusTm @@ var "m" @@ var "n") @@ (plusTm @@ var "n" @@ var "m")
+  NfId NfNat (plusTm @@ var "m" @@ var "n") (plusTm @@ var "n" @@ var "m")
+  --eqNat @@ (plusTm @@ var "m" @@ var "n") @@ (plusTm @@ var "n" @@ var "m")
 
 
 -- (m n k : Nat) -> Eq (plus m (plus n k)) (plus (plus m n) k)
@@ -195,9 +199,12 @@ plusAssoc =
   NfPi "m" NfNat $
   NfPi "n" NfNat $
   NfPi "k" NfNat $
-  eqNat @@
-    (plusTm @@ var "m" @@ (plusTm @@ var "n" @@ var "k")) @@
+  NfId NfNat
+    (plusTm @@ var "m" @@ (plusTm @@ var "n" @@ var "k"))
     (plusTm @@ (plusTm @@ var "m" @@ var "n") @@ var "k")
+  -- eqNat @@
+  --   (plusTm @@ var "m" @@ (plusTm @@ var "n" @@ var "k")) @@
+  --   (plusTm @@ (plusTm @@ var "m" @@ var "n") @@ var "k")
 
 {-
 double : Nat -> Nat
@@ -228,6 +235,7 @@ compose =
   NfPi "B" type0 $
   NfPi "C" type0 $
   (var "B" ==> var "C") ==> (var "A" ==> var "B") ==> var "A" ==> var "C"
+
 {-
 (A : Type) (B : A -> Type) (C : (x : A) -> B cx -> Type) ->
 ((x : A) (y : B x) -> C x y) ->
@@ -270,13 +278,15 @@ natDiscrete :: Nf
 natDiscrete =
   NfPi "m" NfNat $
   NfPi "n" NfNat $
+  --decTy (NfId NfNat (var "m") (var "n"))
   decTy (eqNat @@ var "m" @@ var "n")
 
 {-
 isEven n = [k : Nat] (2 * k == n)
 -}
 isEven :: Nf -> Nf
-isEven n = NfSigma "k" NfNat $ eqNat @@ (doubleTm @@ var "k") @@ n
+isEven n = NfSigma "k" NfNat $ NfId NfNat (doubleTm @@ var "k") n
+  -- NfSigma "k" NfNat $ eqNat @@ (doubleTm @@ var "k") @@ n
 
 {-
 isOdd n = isEven n -> Empty
@@ -296,13 +306,14 @@ numeral :: Int -> Nf
 numeral 0 = NfZero
 numeral i = NfSuc (numeral (i-1))
 
+-- 0.0024 
 types :: [Nf]
 types =
-    -- [curryTy, uncurryTy, contrapos, compose, depCompose,
-    --  notInvolTy]
-  [curryTy, uncurryTy, contrapos, compose, depCompose,
-   notInvolTy, plusZero, natDiscrete, isEven (numeral 100),
-   isEvenPlusTwo]
+    [curryTy, uncurryTy, contrapos, compose, depCompose,
+     notInvolTy, plusZero, isEven (numeral 50), isEvenPlusTwo]
+  -- [curryTy, uncurryTy, contrapos, compose, depCompose,
+   -- notInvolTy, plusZero, natDiscrete, isEven (numeral 100),
+   -- isEvenPlusTwo]
 
 ctx :: Ctx
 ctx = empty
@@ -318,8 +329,3 @@ main :: IO ()
 main = do
   mapM_ doSynth $ types
   return ()
-  -- putStrLn $ show (toList ctx) ++ " ⊢ ? : " ++ show typ ++ "\n"
-  -- t <- timeIt (return $ head $ synthAll ctx typ)
-  -- return ()
-  -- head $ synthAll ctx typ
-  -- mapM_ print $ synthUpto 100 ctx plusZeroTy

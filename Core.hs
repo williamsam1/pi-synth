@@ -49,7 +49,7 @@ data Nf
   | NfSum Nf Nf | NfInl Nf Nf | NfInr Nf Nf
   | NfSumInd Nf Nf Nf
   | NfSigma String Nf Nf | NfPair Nf Nf
-  | NfProdInd Nf Nf
+  | NfProdInd Nf Nf | NfFst String Nf Nf | NfSnd String Nf Nf
   | NfNat | NfZero | NfSuc Nf
   | NfNatInd Nf Nf Nf
   | NfId Nf Nf Nf
@@ -97,8 +97,8 @@ niceVar NfUnit          = "u"
 niceVar (NfSum _ _)     = "s"
 niceVar (NfSigma _ _ _) = "p"
 niceVar NfNat           = "n"
-niceVar (NfNe _)        = "x"
-niceVar _ = "_"
+niceVar (NfId _ _ _)    = "p"
+niceVar _               = "x"
 
 needsParensNat :: Nf -> Bool
 needsParensNat n =
@@ -113,6 +113,8 @@ needsParensNf :: Position -> Nf -> Bool
 needsParensNf p (NfNe n)      = needsParensNe p n
 needsParensNf p (NfLam _ _ _) = True
 needsParensNf p (NfPair _ _) = False
+needsParensNf p (NfFst _ _ _) = False
+needsParensNf p (NfSnd _ _ _) = False
 needsParensNf InfixL (NfPi _ _ _)  = True
 needsParensNf InfixL (NfSigma _ _ _) = True
 needsParensNf InfixL (NfSuc n)     = needsParensNat (NfSuc n)
@@ -235,6 +237,8 @@ showNf (NfSumInd p f g) =
   -- withParensNf Arg g
 showNf (NfSigma x a b) = showSig x a b
 showNf (NfPair s t) = "(" ++ show s ++ ", " ++ show t ++ ")"
+showNf (NfFst _ _ _) = "fst"
+showNf (NfSnd _ _ _) = "snd"
 showNf (NfProdInd p f) =
   "ProdInd " ++
   withParensNf Arg f
@@ -249,11 +253,14 @@ showNf (NfNatInd p z s) =
   -- withParensNf Arg p ++ " " ++
   -- withParensNf Arg z
   -- withParensNf Arg s
-showNf (NfId a s t)    = withParensNf InfixL s ++ " == " ++ withParensNf Arg t
-showNf (NfCong f p)  = "Cong " ++ withParensNf Arg f ++ " " ++ withParensNf Arg p
-showNf (NfRefl t)    = "Refl " ++ withParensNf Arg t
-showNf (NfSym p)     = "Sym " ++ withParensNf Arg p
-showNf (NfTrans p q) = "Trans " ++ withParensNf Arg p ++ " " ++ withParensNf Arg q
+showNf (NfId a s t)  = withParensNf InfixL s ++ " == " ++ withParensNf Arg t
+showNf (NfCong f p)  = --withParensNf InfixL f ++ " @ " ++ withParensNf Arg p
+  "cong " ++ withParensNf Arg f ++ " " ++ withParensNf Arg p
+showNf (NfRefl t)    = "refl" -- ++ withParensNf Arg t
+showNf (NfSym p)     = "~ " ++ withParensNf Arg p
+  -- "sym " ++ withParensNf Arg p
+showNf (NfTrans p q) = withParensNf InfixL p ++ " ∙ " ++ withParensNf Arg q
+  -- "trans " ++ withParensNf Arg p ++ " " ++ withParensNf Arg q
 
 showNe :: Ne -> String
 showNe (NeV x)     = x
@@ -350,6 +357,14 @@ alphaEqRenNf r (NfSigma x a s) (NfSigma y b t)
 alphaEqRenNf r (NfPair s t) (NfPair s' t') =
   alphaEqRenNf r s s' &&
   alphaEqRenNf r t t'
+alphaEqRenNf r (NfFst x a s) (NfFst y b t)
+  | not (alphaEqRenNf r a b) = False
+  | x == y                   = alphaEqRenNf r s t
+  | otherwise                = alphaEqRenNf (insert x y r) s t
+alphaEqRenNf r (NfSnd x a s) (NfSnd y b t)
+  | not (alphaEqRenNf r a b) = False
+  | x == y                   = alphaEqRenNf r s t
+  | otherwise                = alphaEqRenNf (insert x y r) s t
 alphaEqRenNf r (NfProdInd p f) (NfProdInd p' f') =
   alphaEqRenNf r p p' &&
   alphaEqRenNf r f f'
@@ -434,6 +449,12 @@ renameNf x y (NfSigma z a b)
   | z == x    = NfSigma z (renameNf x y a) b
   | otherwise = NfSigma z (renameNf x y a) (renameNf x y b)
 renameNf x y (NfPair s t) = NfPair (renameNf x y s) (renameNf x y t)
+renameNf x y (NfFst z a b)
+  | z == x    = NfFst z (renameNf x y a) b
+  | otherwise = NfFst z (renameNf x y a) (renameNf x y b)
+renameNf x y (NfSnd z a b)
+  | z == x    = NfSnd z (renameNf x y a) b
+  | otherwise = NfSnd z (renameNf x y a) (renameNf x y b)
 renameNf x y (NfProdInd p f) = NfProdInd (renameNf x y p) (renameNf x y f)
 renameNf x y NfNat = NfNat
 renameNf x y NfZero = NfZero
@@ -482,6 +503,10 @@ freeVarsNf (NfSumInd p f g) =
 freeVarsNf (NfSigma x a b) =
   freeVarsNf a `Set.union` (freeVarsNf b `Set.difference` Set.singleton x)
 freeVarsNf (NfPair s t) = freeVarsNf s `Set.union` freeVarsNf t
+freeVarsNf (NfFst x a b) =
+  freeVarsNf a `Set.union` (freeVarsNf b `Set.difference` Set.singleton x)
+freeVarsNf (NfSnd x a b) =
+  freeVarsNf a `Set.union` (freeVarsNf b `Set.difference` Set.singleton x)
 freeVarsNf (NfProdInd p f) = freeVarsNf p `Set.union` freeVarsNf f
 freeVarsNf (NfSuc n) = freeVarsNf n
 freeVarsNf (NfNatInd p z s) =
@@ -537,6 +562,8 @@ boundVarsNf (NfSumInd p f g) =
   boundVarsNf g
 boundVarsNf (NfSigma x a b) = Set.singleton x `Set.union` boundVarsNf a `Set.union` boundVarsNf b
 boundVarsNf (NfPair s t) = boundVarsNf s `Set.union` boundVarsNf t
+boundVarsNf (NfFst x a b) = Set.singleton x `Set.union` boundVarsNf a `Set.union` boundVarsNf b
+boundVarsNf (NfSnd x a b) = Set.singleton x `Set.union` boundVarsNf a `Set.union` boundVarsNf b
 boundVarsNf (NfProdInd p f) = boundVarsNf p `Set.union` boundVarsNf f
 boundVarsNf (NfSuc n) = boundVarsNf n
 boundVarsNf (NfNatInd p z s) =
@@ -644,6 +671,34 @@ substNf x v (NfSigma y a b)
     fv = freeVarsNf v
     rec = substNf x v
 substNf x v (NfPair s t) = NfPair (substNf x v s) (substNf x v t)
+substNf x v (NfFst y a b)
+  | y == x       = NfSigma y a b
+  | y `elem` fv  =
+    let y' = newName y fv
+        a' = rec a
+        b' = rec (renameNf y y' b) in
+        NfSigma y' a' b'
+  | otherwise =
+    let a' = rec a
+        b' = rec b in
+        NfSigma y a' b'
+  where
+    fv = freeVarsNf v
+    rec = substNf x v
+substNf x v (NfSnd y a b)
+  | y == x       = NfSigma y a b
+  | y `elem` fv  =
+    let y' = newName y fv
+        a' = rec a
+        b' = rec (renameNf y y' b) in
+        NfSigma y' a' b'
+  | otherwise =
+    let a' = rec a
+        b' = rec b in
+        NfSigma y a' b'
+  where
+    fv = freeVarsNf v
+    rec = substNf x v
 substNf x v (NfProdInd p f) = NfProdInd (substNf x v p) (substNf x v f)
 substNf x v (NfSuc n)   = NfSuc (substNf x v n)
 substNf x v (NfNatInd p z s) =
@@ -732,6 +787,10 @@ apply (NfSumInd p f g) (NfInr b _) = g @@ b
 apply (NfProdInd p f) (NfNe n) = NfNe (NeProdInd p f n)
 apply (NfProdInd p f) (NfPair s t) = f @@ s @@ t
 apply (NfNatInd p z s) t = evalNatInd p z s t
+apply (NfFst _ _ _) (NfNe n) = NfNe (NeFst n)
+apply (NfFst _ _ _) (NfPair s t) = s
+apply (NfSnd _ _ _) (NfNe n) = NfNe (NeSnd n)
+apply (NfSnd _ _ _) (NfPair s t) = t
 
 infixl 7 @@
 (@@) :: Nf -> Nf -> Nf
@@ -887,6 +946,11 @@ getTypeNf ctx (NfSigma x a b) = do
     Nothing -> Left (NoRule s1 s2)
     Just s  -> Right (NfS s)
 getTypeNf ctx (NfPair a b) = Left (CannotInfer (NfPair a b))
+getTypeNf ctx (NfFst x a b) = Right (NfSigma x a b ==> a)
+getTypeNf ctx (NfSnd x a b) = 
+    Right (NfPi v (NfSigma x a b) $ b @@ NfNe (NeFst (NeV v)))
+    where
+    v = freeNameCtx "p" ctx
 getTypeNf ctx (NfProdInd p _) = do
   a         <- getTypeNf ctx p
   (x, a, b) <- asFun p a

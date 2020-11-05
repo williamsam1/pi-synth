@@ -1,5 +1,6 @@
 module Synthesis where
 
+import Data.Maybe (catMaybes)
 import Data.Map (Map, empty, insert, lookup, toList)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -17,37 +18,38 @@ synth s ctx a =
   if s < 0
     then []
     else
-      synthCtx s ctx a ++ synthTy s ctx a
+      synthNe s ctx a ++ synthTy s ctx a
 
-synthSpinesHelper :: Int -> Ctx -> [(Ne, Nf, Int)] -> [(Ne, Nf)]
-synthSpinesHelper s ctx [] = []
-synthSpinesHelper s ctx ((n, NfPi x a b, s1):xs) =
+synthNeHelper :: Int -> Ctx -> [(Ne, Nf, Int)] -> [(Ne, Nf)]
+synthNeHelper s ctx [] = []
+synthNeHelper s ctx ((n, NfPi x a b, s1):xs) =
   if s1 >= s
-    then (n, NfPi x a b) : synthSpinesHelper s ctx xs
-    else synthSpinesHelper s ctx (ys ++ xs)
+    then (n, NfPi x a b) : synthNeHelper s ctx xs
+    else synthNeHelper s ctx (ys ++ xs)
   where
     ys :: [(Ne, Nf, Int)]
     ys = [(NeApp n v, substNf x v b, s1+s2) | s2 <- [0..s-s1-1], v <- synth s2 ctx a]
-synthSpinesHelper s ctx ((n, NfSigma x a b, s1):xs) =
+synthNeHelper s ctx ((n, NfSigma x a b, s1):xs) =
   if s1 >= s
-    then (n, NfSigma x a b) : synthSpinesHelper s ctx xs
-    else synthSpinesHelper s ctx (ys ++ xs)
+    then (n, NfSigma x a b) : synthNeHelper s ctx xs
+    else synthNeHelper s ctx (ys ++ xs)
   where
     ys :: [(Ne, Nf, Int)]
     ys = [(NeFst n, a, 1+s1), (NeSnd n, substNf x (NfNe (NeFst n)) b, 1+s1)]
-synthSpinesHelper s ctx ((n, t, s1):xs) = 
-  (n, t) : synthSpinesHelper s ctx xs
+synthNeHelper s ctx ((n, t, s1):xs) = 
+  (n, t) : synthNeHelper s ctx xs
 
--- Generate all valid spines from the context
+-- Generate all neutral forms in the given context
 -- Not very efficient, but general
 -- Is it possible to try and unify variable codomains
 -- with goal types for a more efficient procedure?
-synthSpines :: Int -> Ctx -> [(Ne, Nf)]
-synthSpines s ctx = synthSpinesHelper s ctx [(NeV x, t, 0) | (x, t) <- toList ctx]
+-- May consider doing this only for large context sizes
+synthAllNe :: Int -> Ctx -> [(Ne, Nf)]
+synthAllNe s ctx = synthNeHelper s ctx [(NeV x, t, 0) | (x, t) <- toList ctx]
 
 -- Context-guided search (neutral forms)
-synthCtx :: Int -> Ctx -> Nf -> [Nf]
-synthCtx s ctx a = [NfNe n | (n, t) <- synthSpines s ctx, t == a]
+synthNe :: Int -> Ctx -> Nf -> [Nf]
+synthNe s ctx a = [NfNe n | (n, t) <- synthAllNe s ctx, t == a]
 
 -- Type-guided search (introduction forms)
 synthTy :: Int -> Ctx -> Nf -> [Nf]
@@ -57,6 +59,7 @@ synthTy s ctx NfUnit          = if s == 0 then [NfTT] else []
 synthTy s ctx NfNat           = synthNat s ctx
 synthTy s ctx (NfSum a b)     = synthSum s ctx a b
 synthTy s ctx (NfSigma x a b) = synthPair s ctx x a b
+synthTy s ctx (NfId a x y)    = synthPath s ctx x y
 synthTy s ctx _               = []
 
 synthNat :: Int -> Ctx -> [Nf]
@@ -81,7 +84,7 @@ synthSort s ctx (Type i) =
     else tjti ++ titj
   where
     x :: String
-    x = newName "A" (Map.keysSet ctx)
+    x = freeNameCtx "A" ctx
     tjti :: [Nf]
     tjti = [NfPi x a b | s1 <- [0..s-1], j <- [0..i], a <- synth s1 ctx (NfS (Type j)), b <- synth (s-1-s1) (insert x a ctx) (NfS (Type i))]
     titj :: [Nf]
@@ -145,3 +148,229 @@ synthRec s ctx x NfNat p =
     y :: String
     y = newName "n" (Map.keysSet ctx `Set.union` boundVarsNf p `Set.union` Set.singleton x)
 synthRec _ _ _ _ _ = []
+
+
+-- Finds all paths which are in neutral form
+synthAllNePaths :: Int -> Ctx -> [(Nf, Nf, Nf)]
+synthAllNePaths s ctx = catMaybes [f n t | (n, t) <- synthAllNe s ctx]
+  where
+    f :: Ne -> Nf -> Maybe (Nf, Nf, Nf)
+    f n (NfId _ a b) = Just (NfNe n, a, b)
+    f _ _ = Nothing
+
+{-
+Helper for finding paths using congruence
+
+if
+  rightTermOf s t == Just Nothing
+then
+  s == t
+
+if
+  rightTermOf s t == Just (Just f)
+then
+  f @@ s == t
+-}
+rightTermOfNf :: Ctx -> Nf -> Nf -> Maybe (Maybe Nf)
+rightTermOfNf ctx (NfNe x) (NfNe y) = rightTermOfNe ctx x y
+rightTermOfNf ctx x (NfSuc y) = case rightTermOfNf ctx x y of
+  Nothing       -> if x == NfSuc y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v NfNat $ NfSuc (var v)
+  Just (Just f) -> Just $ Just $ NfLam v NfNat $ NfSuc (f @@ var v)
+  where
+    v :: String
+    v = freeNameCtx "n" ctx
+rightTermOfNf ctx x (NfInl y a) = case rightTermOfNf ctx x y of
+  Nothing       -> if x == NfInl y a then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v NfNat $ NfInl (var v) a
+  Just (Just f) -> Just $ Just $ NfLam v NfNat $ NfInl (f @@ var v) a
+  where
+    v :: String
+    v = freeNameCtx (niceVar a) ctx
+rightTermOfNf ctx x (NfInr y b) = case rightTermOfNf ctx x y of
+  Nothing       -> if x == NfInr y b then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v NfNat $ NfInr (var v) b
+  Just (Just f) -> Just $ Just $ NfLam v NfNat $ NfInr (f @@ var v) b
+  where
+    v :: String
+    v = freeNameCtx (niceVar b) ctx
+rightTermOfNf ctx x y = if x == y then Just Nothing else Nothing
+
+
+rightTermOfNe :: Ctx -> Ne -> Ne -> Maybe (Maybe Nf)
+rightTermOfNe ctx x (NeFst y) = case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeFst y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v t $ NfNe (NeFst (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v t $ NfFst z a b @@ (f @@ var v)
+  where
+    t :: Nf
+    t = case getTypeNe ctx y of
+      Right t -> t
+    z :: String
+    z = case t of
+      NfSigma z _ _ -> z
+    a :: Nf
+    a = case t of
+      NfSigma _ a _ -> a
+    b :: Nf
+    b = case t of
+      NfSigma _ _ b -> b
+    v :: String
+    v = freeNameCtx (niceVar t) ctx
+rightTermOfNe ctx x (NeSnd y) = case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeSnd y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v t $ NfNe (NeSnd (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v t $ NfSnd z a b @@ (f @@ var v)
+  where
+    t :: Nf
+    t = case getTypeNe ctx y of
+      Right t -> t
+    z :: String
+    z = case t of
+      NfSigma z _ _ -> z
+    a :: Nf
+    a = case t of
+      NfSigma _ a _ -> a
+    b :: Nf
+    b = case t of
+      NfSigma _ _ b -> b
+    v :: String
+    v = freeNameCtx (niceVar t) ctx
+rightTermOfNe ctx x (NeEmptyInd p y) =
+  case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeEmptyInd p y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v NfEmpty $ NfNe (NeEmptyInd p (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v NfEmpty $ NfEmptyInd p @@ (f @@ var v)
+  where
+    v :: String
+    v = freeNameCtx (niceVar NfEmpty) ctx
+rightTermOfNe ctx x (NeUnitInd p t y) =
+  case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeUnitInd p t y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v NfUnit $ NfNe (NeUnitInd p t (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v NfUnit $ NfUnitInd p t @@ (f @@ var v)
+  where
+    v :: String
+    v = freeNameCtx (niceVar NfUnit) ctx
+rightTermOfNe ctx x (NeSumInd p s t y) =
+  case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeSumInd p s t y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v st $ NfNe (NeSumInd p s t (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v st $ NfSumInd p s t @@ (f @@ var v)
+  where
+    st :: Nf
+    st = case getTypeNe ctx y of
+      Right t -> t
+    v :: String
+    v = freeNameCtx (niceVar st) ctx
+rightTermOfNe ctx x (NeProdInd p s y) =
+  case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeProdInd p s y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v pr $ NfNe (NeProdInd p s (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v pr $ NfProdInd p s @@ (f @@ var v)
+  where
+    pr :: Nf
+    pr = case getTypeNe ctx y of
+      Right t -> t
+    v :: String
+    v = freeNameCtx (niceVar pr) ctx
+rightTermOfNe ctx x (NeNatInd p s t y) =
+  case rightTermOfNe ctx x y of
+  Nothing       -> if x == NeNatInd p s t y then Just Nothing else Nothing
+  Just Nothing  -> Just $ Just $ NfLam v st $ NfNe (NeNatInd p s t (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v st $ NfNatInd p s t @@ (f @@ var v)
+  where
+    st :: Nf
+    st = case getTypeNe ctx y of
+      Right t -> t
+    v :: String
+    v = freeNameCtx (niceVar st) ctx
+rightTermOfNe ctx x y = if x == y then Just Nothing else Nothing
+
+{-
+  synthPathFrom0 c ctx x
+finds all paths
+  p : x == y
+which are in neutral form,
+or are congruence applied to a neutral form
+
+p0 :== n | cong e n
+-}
+synthPathFrom0 :: Int -> Ctx -> Nf -> [(Nf, Nf)]
+synthPathFrom0 s ctx x = catMaybes [f p a b | (p, a, b) <- synthAllNePaths s ctx]
+    where
+      f :: Nf -> Nf -> Nf -> Maybe (Nf, Nf)
+      f p a b = case rightTermOfNf ctx a x of
+        Nothing       -> Nothing
+        Just Nothing  -> Just (p, b)
+        Just (Just f) -> Just (NfCong f p, f @@ b)
+
+{-
+  synthPathTo0 c ctx x
+finds all paths
+  p : y == x
+which are in neutral form,
+or are congruence applied to a neutral form
+
+p0 :== n | cong e n
+-}
+synthPathTo0 :: Int -> Ctx -> Nf -> [(Nf, Nf)]
+synthPathTo0 s ctx x = catMaybes [f p a b | (p, a, b) <- synthAllNePaths s ctx]
+    where
+      f :: Nf -> Nf -> Nf -> Maybe (Nf, Nf)
+      f p a b = case rightTermOfNf ctx b x of
+        Nothing       -> Nothing
+        Just Nothing  -> Just (p, a)
+        Just (Just f) -> Just (NfCong f p, f @@ a)
+
+{-
+  synthPathFrom1 c ctx x
+finds all paths
+p : x == y
+which are of the form p0,
+or symmetry applied to p0
+
+p1 :== p0 | Sym p0
+-}
+synthPathFrom1 :: Int -> Ctx -> Nf -> [(Nf, Nf)]
+synthPathFrom1 s ctx x =
+  synthPathFrom0 s ctx x ++
+  [(NfSym p, y) | (p, y) <- synthPathTo0 s ctx x]
+
+-- Don't want to include unnecessary refls at the end
+trans :: Nf -> Nf -> Nf
+trans p (NfRefl _) = p
+trans p q          = NfTrans p q
+
+-- p2 :== Refl x | Trans p1 p2
+
+{-
+  synthPath2 c ctx x z
+finds all paths
+  p : x == z
+which are of the form refl,
+or transitivity applied to some
+  p1 : x == y
+  p2 : y == z
+
+p2 :== Refl x | Trans p1 p2
+-}
+synthPath2 :: Int -> Ctx -> Nf -> Nf -> [Nf]
+synthPath2 0 ctx x z =
+  if x == z
+    then [NfRefl x]
+    else []
+synthPath2 s ctx x z =
+  [ trans p q |
+    s1 <- [0..s-1],
+    (p, y) <- synthPathFrom1 s1 ctx x,
+    q      <- synthPath2 (s-1-s1) ctx y z
+  ]
+
+{-
+synthPath s ctx x y finds proofs that x == y
+
+
+-}
+synthPath :: Int -> Ctx -> Nf -> Nf -> [Nf]
+synthPath s ctx x y = synthPath2 s ctx x y
