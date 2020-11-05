@@ -144,7 +144,7 @@ eqNat =
       natRec type0 NfEmpty (NfLam "n" NfNat $ NfLam "_" type0 $ var "f" @@ var "n")
 
 {-
-plus : Nat -> Nat -> Type
+plus : Nat -> Nat -> Nat
 plus zero    n  = n
 plus (suc m) n  = suc (plus m n)
 
@@ -166,6 +166,22 @@ plusZero =
   eqNat @@ (plusTm @@ var "n" @@ NfZero) @@ var "n"
 
 -- (m n : Nat) -> Eq (plus m n) (plus n m)
+{-
++-zero : (n : Nat) -> n == n + 0
++-zero 0       = refl 0
++-zero (suc n) = cong suc (+-zero n)
+
++-comm : (m n : Nat) -> m + n == n + m
++-comm 0       n = +-zero n
++-comm (suc m) n = 
+
+suc m + n == n + suc m
+suc (m + n) == n + suc m
+
++-comm m n : m + n == n + m
+
+This cannot be proven in our 
+-}
 plusComm :: Nf
 plusComm =
   NfPi "m" NfNat $
@@ -182,6 +198,21 @@ plusAssoc =
   eqNat @@
     (plusTm @@ var "m" @@ (plusTm @@ var "n" @@ var "k")) @@
     (plusTm @@ (plusTm @@ var "m" @@ var "n") @@ var "k")
+
+{-
+double : Nat -> Nat
+double zero    = zero
+double (suc n) = suc (suc (double n))
+
+double = NatRec (\n.n) (\m n.suc (suc n))
+-}
+doubleTm :: Nf
+doubleTm =
+  natRec NfNat
+    NfZero $
+    NfLam "m" NfNat $
+    NfLam "n" NfNat $
+    NfSuc (NfSuc (var "n"))
 
 -- (A -> B) -> ~B -> ~A
 contrapos :: Nf
@@ -241,22 +272,25 @@ natDiscrete =
   NfPi "n" NfNat $
   decTy (eqNat @@ var "m" @@ var "n")
 
-
 {-
-Sigma : (A : Type) -> (A -> Type) -> Type1
-Sigma A B = (P : Type) -> ((x : A) -> B x -> P) -> P
--}
-sigmaTy :: Nf -> Nf -> Nf
-sigmaTy a b = NfPi "P" type0 $ (NfPi "x" a $ b @@ var "x" ==> var "P") ==> var "P"
-
-{-
-isEven n = [k : Nat] (k + k == n)
-
-Sigma Nat (\k -> k + k == n) =>
-(P : Type) -> ((x : Nat) -> x + x == n -> P) -> P
+isEven n = [k : Nat] (2 * k == n)
 -}
 isEven :: Nf -> Nf
-isEven n = sigmaTy NfNat $ NfLam "k" NfNat $ eqNat @@ (plusTm @@ var "k" @@ var "k") @@ n
+isEven n = NfSigma "k" NfNat $ eqNat @@ (doubleTm @@ var "k") @@ n
+
+{-
+isOdd n = isEven n -> Empty
+-}
+isOdd :: Nf -> Nf
+isOdd n = isEven n ==> NfEmpty
+
+{-
+isEvenPlusTwo = (n : Nat) -> isEven n -> isEven (suc (suc n))
+-}
+isEvenPlusTwo :: Nf
+isEvenPlusTwo =
+  NfPi "n" NfNat $
+  isEven (var "n") ==> isEven (NfSuc $ NfSuc $ var "n")
 
 numeral :: Int -> Nf
 numeral 0 = NfZero
@@ -265,7 +299,8 @@ numeral i = NfSuc (numeral (i-1))
 types :: [Nf]
 types =
   [curryTy, uncurryTy, contrapos, compose, depCompose,
-   notInvolTy, plusZero, natDiscrete, isEven (numeral 20)]
+   notInvolTy, plusZero, natDiscrete, isEven (numeral 100),
+   isEvenPlusTwo]
 
 ctx :: Ctx
 ctx = empty

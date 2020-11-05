@@ -17,8 +17,7 @@ synth s ctx a =
   if s < 0
     then []
     else
-      [NfNe n | n <- synthCtx s ctx a] ++
-      synthTy s ctx a
+      synthCtx s ctx a ++ synthTy s ctx a
 
 synthSpinesHelper :: Int -> Ctx -> [(Ne, Nf, Int)] -> [(Ne, Nf)]
 synthSpinesHelper s ctx [] = []
@@ -29,6 +28,13 @@ synthSpinesHelper s ctx ((n, NfPi x a b, s1):xs) =
   where
     ys :: [(Ne, Nf, Int)]
     ys = [(NeApp n v, substNf x v b, s1+s2) | s2 <- [0..s-s1-1], v <- synth s2 ctx a]
+synthSpinesHelper s ctx ((n, NfSigma x a b, s1):xs) =
+  if s1 >= s
+    then (n, NfSigma x a b) : synthSpinesHelper s ctx xs
+    else synthSpinesHelper s ctx (ys ++ xs)
+  where
+    ys :: [(Ne, Nf, Int)]
+    ys = [(NeFst n, a, 1+s1), (NeSnd n, substNf x (NfNe (NeFst n)) b, 1+s1)]
 synthSpinesHelper s ctx ((n, t, s1):xs) = 
   (n, t) : synthSpinesHelper s ctx xs
 
@@ -40,18 +46,18 @@ synthSpines :: Int -> Ctx -> [(Ne, Nf)]
 synthSpines s ctx = synthSpinesHelper s ctx [(NeV x, t, 0) | (x, t) <- toList ctx]
 
 -- Context-guided search (spines)
-synthCtx :: Int -> Ctx -> Nf -> [Ne]
-synthCtx s ctx a = [n | (n, t) <- synthSpines s ctx, t == a]
+synthCtx :: Int -> Ctx -> Nf -> [Nf]
+synthCtx s ctx a = [NfNe n | (n, t) <- synthSpines s ctx, t == a]
 
 -- Type-guided search (introduction forms)
 synthTy :: Int -> Ctx -> Nf -> [Nf]
-synthTy s ctx (NfS i)       = synthSort s ctx i
-synthTy s ctx (NfPi x a b)  = synthProd s ctx x a b
-synthTy s ctx NfUnit        = if s == 0 then [NfTT] else []
-synthTy s ctx NfNat         = synthNat s ctx
-synthTy s ctx (NfSum a b)   = synthSum s ctx a b
-synthTy s ctx (NfProd a b)  = synthPair s ctx a b
-synthTy s ctx _             = []
+synthTy s ctx (NfS i)         = synthSort s ctx i
+synthTy s ctx (NfPi x a b)    = synthProd s ctx x a b
+synthTy s ctx NfUnit          = if s == 0 then [NfTT] else []
+synthTy s ctx NfNat           = synthNat s ctx
+synthTy s ctx (NfSum a b)     = synthSum s ctx a b
+synthTy s ctx (NfSigma x a b) = synthPair s ctx x a b
+synthTy s ctx _               = []
 
 synthNat :: Int -> Ctx -> [Nf]
 synthNat 0 ctx = [NfZero]
@@ -63,10 +69,10 @@ synthSum s ctx a b =
   [NfInl t b | t <- synth (s-1) ctx a] ++
   [NfInr t a | t <- synth (s-1) ctx b]
 
-synthPair :: Int -> Ctx -> Nf -> Nf -> [Nf]
-synthPair 0 ctx a b = []
-synthPair s ctx a b =
-  [NfPair t v | s1 <- [0..s-1], t <- synth s1 ctx a, v <- synth (s-1-s1) ctx b]
+synthPair :: Int -> Ctx -> String -> Nf -> Nf -> [Nf]
+synthPair 0 ctx x a b = []
+synthPair s ctx x a b =
+  [NfPair t v | s1 <- [0..s-1], t <- synth s1 ctx a, v <- synth (s-1-s1) ctx (substNf x t b)]
 
 synthSort :: Int -> Ctx -> Sort -> [Nf]
 synthSort s ctx (Type i) =
@@ -92,7 +98,7 @@ synthLam s ctx x a b = [NfLam y a t | t <- synth (s-1) (insert y a ctx) b]
     -- abstraction if this is an arrow type
     y :: String
     y = if x == "_"
-      then newName "x" (Map.keysSet ctx `Set.union` boundVarsNf b)
+      then newName (niceVar a) (Map.keysSet ctx `Set.union` boundVarsNf b)
       else x
 
 -- Synthesize product with an induction principle
@@ -105,24 +111,24 @@ synthRec s ctx x (NfSum a b) p =
   [ NfSumInd (NfLam x (NfSum a b) p) f g |
     s1 <- [0..s-1],
     f <- synth s1 ctx (NfPi y a $ substNf x (NfInl (var y) b) p),
-    g <- synth (s-1-s1) ctx (NfPi y b $ substNf x (NfInr (var y) a) p) ]
+    g <- synth (s-1-s1) ctx (NfPi z b $ substNf x (NfInr (var z) a) p) ]
   where
     y :: String
-    y = newName "n"
-          (Map.keysSet ctx `Set.union`
-          boundVarsNf p `Set.union`
-          Set.singleton x)
-synthRec s ctx x (NfProd a b) p = 
-  [ NfProdInd (NfLam x (NfProd a b) p) f |
-    f <- synth (s-1) ctx (NfPi y a $ NfPi z b $ substNf x (NfPair (var y) (var z)) p) ]
-  where
-    y :: String
-    y = newName "n"
+    y = newName (niceVar a)
           (Map.keysSet ctx `Set.union`
           boundVarsNf p `Set.union`
           Set.singleton x)
     z :: String
-    z = newName "n"
+    z = newName (niceVar b)
+          (Map.keysSet ctx `Set.union`
+          boundVarsNf p `Set.union`
+          Set.singleton x)
+synthRec s ctx x (NfSigma y a b) p = 
+  [ NfProdInd (NfLam x (NfSigma y a b) p) f |
+    f <- synth (s-1) ctx (NfPi y a $ NfPi z b $ substNf x (NfPair (var y) (var z)) p) ]
+  where
+    z :: String
+    z = newName (niceVar b)
           (Map.keysSet ctx `Set.union`
           boundVarsNf p `Set.union`
           Set.singleton x `Set.union`
