@@ -71,6 +71,22 @@ type Ctx = Map String Nf
 
 type Env = Map String (Nf, Nf)
 
+prod :: [(String, Nf)] -> Nf -> Nf
+prod []         b = b
+prod ((x,a):vs) b = NfPi x a (prod vs b)
+
+lam :: [(String, Nf)] -> Nf -> Nf
+lam []         b = b
+lam ((x,a):vs) b = NfLam x a (lam vs b)
+
+
+sig :: [(String, Nf)] -> Nf -> Nf
+sig []         b = b
+sig ((x,a):vs) b = NfSigma x a (sig vs b)
+
+neg :: Nf -> Nf
+neg a = a ==> NfEmpty
+
 infixr 6 ==>
 (==>) :: Nf -> Nf -> Nf
 a ==> b = NfPi "_" a b
@@ -78,6 +94,10 @@ a ==> b = NfPi "_" a b
 infixl 7 **
 (**) :: Nf -> Nf -> Nf
 a ** b = NfSigma "_" a b
+
+infixl 8 ||
+(||) :: Nf -> Nf -> Nf
+a || b = NfSum a b
 
 var :: String -> Nf
 var = NfNe . NeV
@@ -128,7 +148,7 @@ needsParensNf p (NfProdInd _ _) = True
 needsParensNf p (NfNatInd _ _ _) = True
 needsParensNf p (NfId _ _ _) = True
 needsParensNf p (NfCong _ _) = True
-needsParensNf p (NfRefl _) = True
+needsParensNf p (NfRefl _) = False -- True
 needsParensNf p (NfSym _) = True
 needsParensNf p (NfTrans _ _) = True
 needsParensNf InfixL _             = False
@@ -180,7 +200,7 @@ showPi x a b
   | otherwise                = "Π(" ++ x ++ ":" ++ showNf a ++ ") " ++ showNf b
 
 showProd :: Nf -> Nf -> String
-showProd a b = withParensNf InfixL a ++ " * " ++ withParensNf InfixR b
+showProd a b = withParensNf InfixL a ++ " * " ++ withParensNf Arg b
 
 showSig :: String -> Nf -> Nf -> String
 showSig x a b

@@ -337,12 +337,25 @@ synthPathFrom1 s ctx x =
   synthPathFrom0 s ctx x ++
   [(NfSym p, y) | (p, y) <- synthPathTo0 s ctx x]
 
--- Don't want to include unnecessary refls at the end
-trans :: Nf -> Nf -> Nf
-trans p (NfRefl _) = p
-trans p q          = NfTrans p q
+isInv :: Nf -> Nf -> Bool
+isInv (NfSym p) q = p == q
+isInv p (NfSym q) = p == q
+isInv _ _ = False
 
--- p2 :== Refl x | Trans p1 p2
+{-
+Don't want to include unnecessary refls
+  p . refl == p
+Also don't want to include redundant paths
+  ~p . p . q == q
+  p . ~p . q == q
+-}
+trans :: Nf -> Nf -> Maybe Nf
+trans p (NfRefl _)    = Just p
+trans p (NfTrans q r) =
+  if isInv p q
+    then Nothing
+    else Just (NfTrans p (NfTrans q r))
+trans p q             = Just (NfTrans p q)
 
 {-
   synthPath2 c ctx x z
@@ -360,7 +373,7 @@ synthPath2 0 ctx x z =
   if x == z
     then [NfRefl x]
     else []
-synthPath2 s ctx x z =
+synthPath2 s ctx x z = catMaybes
   [ trans p q |
     s1 <- [0..s-1],
     (p, y) <- synthPathFrom1 s1 ctx x,
@@ -369,8 +382,6 @@ synthPath2 s ctx x z =
 
 {-
 synthPath s ctx x y finds proofs that x == y
-
-
 -}
 synthPath :: Int -> Ctx -> Nf -> Nf -> [Nf]
 synthPath s ctx x y = synthPath2 s ctx x y
