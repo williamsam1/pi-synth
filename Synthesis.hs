@@ -162,44 +162,45 @@ synthAllNePaths s ctx = catMaybes [f n t | (n, t) <- synthAllNe s ctx]
 Helper for finding paths using congruence
 
 if
-  rightTermOf s t == Just Nothing
+  subtermNf s t == Just Nothing
 then
   s == t
 
 if
-  rightTermOf s t == Just (Just f)
+  subtermNf s t == Just (Just f)
 then
   f @@ s == t
 -}
-rightTermOfNf :: Ctx -> Nf -> Nf -> Maybe (Maybe Nf)
-rightTermOfNf ctx (NfNe x) (NfNe y) = rightTermOfNe ctx x y
-rightTermOfNf ctx x (NfSuc y) = case rightTermOfNf ctx x y of
-  Nothing       -> if x == NfSuc y then Just Nothing else Nothing
+subtermNf :: Ctx -> Nf -> Nf -> Maybe (Maybe Nf)
+subtermNf ctx x y | x == y = Just Nothing
+subtermNf ctx (NfNe x) (NfNe y) = subtermNe ctx x y
+subtermNf ctx x (NfSuc y) = case subtermNf ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v NfNat $ NfSuc (var v)
   Just (Just f) -> Just $ Just $ NfLam v NfNat $ NfSuc (f @@ var v)
   where
     v :: String
     v = freeNameCtx "n" ctx
-rightTermOfNf ctx x (NfInl y a) = case rightTermOfNf ctx x y of
-  Nothing       -> if x == NfInl y a then Just Nothing else Nothing
+subtermNf ctx x (NfInl y a) = case subtermNf ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v NfNat $ NfInl (var v) a
   Just (Just f) -> Just $ Just $ NfLam v NfNat $ NfInl (f @@ var v) a
   where
     v :: String
     v = freeNameCtx (niceVar a) ctx
-rightTermOfNf ctx x (NfInr y b) = case rightTermOfNf ctx x y of
-  Nothing       -> if x == NfInr y b then Just Nothing else Nothing
+subtermNf ctx x (NfInr y b) = case subtermNf ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v NfNat $ NfInr (var v) b
   Just (Just f) -> Just $ Just $ NfLam v NfNat $ NfInr (f @@ var v) b
   where
     v :: String
     v = freeNameCtx (niceVar b) ctx
-rightTermOfNf ctx x y = if x == y then Just Nothing else Nothing
+subtermNf ctx x y = Nothing
 
-
-rightTermOfNe :: Ctx -> Ne -> Ne -> Maybe (Maybe Nf)
-rightTermOfNe ctx x (NeFst y) = case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeFst y then Just Nothing else Nothing
+subtermNe :: Ctx -> Ne -> Ne -> Maybe (Maybe Nf)
+subtermNe ctx x y | x == y = Just Nothing
+subtermNe ctx x (NeFst y) = case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v t $ NfNe (NeFst (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v t $ NfFst z a b @@ (f @@ var v)
   where
@@ -217,8 +218,8 @@ rightTermOfNe ctx x (NeFst y) = case rightTermOfNe ctx x y of
       NfSigma _ _ b -> b
     v :: String
     v = freeNameCtx (niceVar t) ctx
-rightTermOfNe ctx x (NeSnd y) = case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeSnd y then Just Nothing else Nothing
+subtermNe ctx x (NeSnd y) = case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v t $ NfNe (NeSnd (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v t $ NfSnd z a b @@ (f @@ var v)
   where
@@ -236,25 +237,25 @@ rightTermOfNe ctx x (NeSnd y) = case rightTermOfNe ctx x y of
       NfSigma _ _ b -> b
     v :: String
     v = freeNameCtx (niceVar t) ctx
-rightTermOfNe ctx x (NeEmptyInd p y) =
-  case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeEmptyInd p y then Just Nothing else Nothing
+subtermNe ctx x (NeEmptyInd p y) =
+  case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v NfEmpty $ NfNe (NeEmptyInd p (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v NfEmpty $ NfEmptyInd p @@ (f @@ var v)
   where
     v :: String
     v = freeNameCtx (niceVar NfEmpty) ctx
-rightTermOfNe ctx x (NeUnitInd p t y) =
-  case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeUnitInd p t y then Just Nothing else Nothing
+subtermNe ctx x (NeUnitInd p t y) =
+  case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v NfUnit $ NfNe (NeUnitInd p t (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v NfUnit $ NfUnitInd p t @@ (f @@ var v)
   where
     v :: String
     v = freeNameCtx (niceVar NfUnit) ctx
-rightTermOfNe ctx x (NeSumInd p s t y) =
-  case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeSumInd p s t y then Just Nothing else Nothing
+subtermNe ctx x (NeSumInd p s t y) =
+  case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v st $ NfNe (NeSumInd p s t (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v st $ NfSumInd p s t @@ (f @@ var v)
   where
@@ -263,9 +264,9 @@ rightTermOfNe ctx x (NeSumInd p s t y) =
       Right t -> t
     v :: String
     v = freeNameCtx (niceVar st) ctx
-rightTermOfNe ctx x (NeProdInd p s y) =
-  case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeProdInd p s y then Just Nothing else Nothing
+subtermNe ctx x (NeProdInd p s y) =
+  case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v pr $ NfNe (NeProdInd p s (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v pr $ NfProdInd p s @@ (f @@ var v)
   where
@@ -274,9 +275,9 @@ rightTermOfNe ctx x (NeProdInd p s y) =
       Right t -> t
     v :: String
     v = freeNameCtx (niceVar pr) ctx
-rightTermOfNe ctx x (NeNatInd p s t y) =
-  case rightTermOfNe ctx x y of
-  Nothing       -> if x == NeNatInd p s t y then Just Nothing else Nothing
+subtermNe ctx x (NeNatInd p s t y) =
+  case subtermNe ctx x y of
+  Nothing       -> Nothing
   Just Nothing  -> Just $ Just $ NfLam v st $ NfNe (NeNatInd p s t (NeV v))
   Just (Just f) -> Just $ Just $ NfLam v st $ NfNatInd p s t @@ (f @@ var v)
   where
@@ -285,7 +286,29 @@ rightTermOfNe ctx x (NeNatInd p s t y) =
       Right t -> t
     v :: String
     v = freeNameCtx (niceVar st) ctx
-rightTermOfNe ctx x y = if x == y then Just Nothing else Nothing
+subtermNe ctx x (NeApp n t) = case subtermNe ctx x n of
+  Nothing -> case subtermNeNf ctx x t of
+    Nothing       -> Nothing
+    Just Nothing  -> Just $ Just $ NfLam tVar tTy $ NfNe n @@ var tVar
+    Just (Just f) -> Just $ Just $ NfLam tVar tTy $ NfNe n @@ (f @@ var tVar)
+  Just Nothing  -> Just $ Just $ NfLam nVar nTy $ var nVar @@ t
+  Just (Just f) -> Just $ Just $ NfLam nVar nTy $ f @@ var nVar @@ t
+  where
+    nTy :: Nf
+    nTy = case getTypeNe ctx n of
+      Right a -> a
+    nVar :: String
+    nVar = freeNameCtx (niceVar nTy) ctx
+    tTy :: Nf
+    tTy = case getTypeNf ctx t of
+      Right a -> a
+    tVar :: String
+    tVar = freeNameCtx (niceVar tTy) ctx
+subtermNe ctx x y = Nothing
+
+subtermNeNf :: Ctx -> Ne -> Nf -> Maybe (Maybe Nf)
+subtermNeNf ctx x (NfNe y) = subtermNe ctx x y
+subtermNeNf ctx x y        = Nothing
 
 {-
   synthPathFrom0 c ctx x
@@ -300,7 +323,7 @@ synthPathFrom0 :: Int -> Ctx -> Nf -> [(Nf, Nf)]
 synthPathFrom0 s ctx x = catMaybes [f p a b | (p, a, b) <- synthAllNePaths s ctx]
     where
       f :: Nf -> Nf -> Nf -> Maybe (Nf, Nf)
-      f p a b = case rightTermOfNf ctx a x of
+      f p a b = case subtermNf ctx a x of
         Nothing       -> Nothing
         Just Nothing  -> Just (p, b)
         Just (Just f) -> Just (NfCong f p, f @@ b)
@@ -318,7 +341,7 @@ synthPathTo0 :: Int -> Ctx -> Nf -> [(Nf, Nf)]
 synthPathTo0 s ctx x = catMaybes [f p a b | (p, a, b) <- synthAllNePaths s ctx]
     where
       f :: Nf -> Nf -> Nf -> Maybe (Nf, Nf)
-      f p a b = case rightTermOfNf ctx b x of
+      f p a b = case subtermNf ctx b x of
         Nothing       -> Nothing
         Just Nothing  -> Just (p, a)
         Just (Just f) -> Just (NfCong f p, f @@ a)

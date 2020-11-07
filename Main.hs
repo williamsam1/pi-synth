@@ -342,9 +342,10 @@ inverseUnique =
     NfId (var "A") (var "b") (var "c")
 
 types :: [Nf]
-types = [inverseUnique]
-  -- [notInvolTy, plusZero, plusAssoc, plusComm, isEven (numeral 20),
-  -- isEvenPlusTwo, plusSpec, isMonoid NfNat]
+types =
+  [notInvolTy, plusZero, plusAssoc, plusComm, isEven (numeral 20),
+  isEvenPlusTwo, plusSpec, isMonoid NfNat,
+  identityUnique, inverseUnique]
 
 ctx :: Ctx
 ctx = empty
