@@ -26,6 +26,9 @@ timeItT ioa = do
 constTm :: Nf -> Nf -> Nf
 constTm a t = NfLam "_" a t
 
+absurdTm :: Nf -> Nf
+absurdTm a = NfEmptyInd (NfLam "_" NfEmpty a)
+
 unitRec :: Nf -> Nf -> Nf
 unitRec a t = NfUnitInd (constTm NfUnit a) t
 
@@ -341,11 +344,86 @@ inverseUnique =
     NfId (var "A") (var "f" @@ var "c" @@ var "a") (var "e") ==> 
     NfId (var "A") (var "b") (var "c")
 
+listTyA :: Nf -> Nf
+listTyA a = NfSum NfUnit a
+
+listTyB :: Nf -> Nf
+listTyB a =
+  NfSumInd (constTm (NfSum NfUnit a) type0)
+    (NfUnitInd (const NfUnit type0) NfEmpty)
+    (constTm a NfUnit)
+
+listTy :: Nf -> Nf
+listTy a = NfW (listTyA a) (listTyB a)
+
+-- nil a = sup (inl tt) () : List A
+nilTm :: Nf -> Nf
+nilTm a =
+  NfSup (listTyA a) (listTyB a) (NfInl NfTT a) (absurdTm a)
+
+-- cons a x xs = sup (inr x) (\_ -> xs)
+consTm :: Nf -> Nf -> Nf -> Nf
+consTm a x xs =
+  NfSup (listTyA a) (listTyB a) (NfInr x NfUnit) (constTm NfUnit xs)
+
+lengthTy :: Nf
+lengthTy =
+  NfPi "A" type0 $
+  NfSigma "f" (listTy (var "A") ==> NfNat) $
+  NfId NfNat (var "f" @@ nilTm (var "A")) NfZero **
+  (NfPi "x" (var "A") $ NfPi "xs" (listTy (var "A")) $
+    NfId NfNat
+      (var "f" @@ (consTm (var "A") (var "x") (var "xs")))
+      (NfSuc (var "f" @@ var "xs")))
+
+maybeTy :: Nf -> Nf
+maybeTy a = NfSum NfUnit a
+
+comp :: Nf -> Nf -> Nf -> Nf
+comp a f g = NfLam "x" a $ f @@ (g @@ var "x")
+
+idFun :: Nf -> Nf
+idFun a = NfLam "x" a (var "x")
+
+functorTy :: (Nf -> Nf) -> Nf
+functorTy f =
+  NfPi "A" type0 $ NfPi "B" type0 $
+  (var "A" ==> var "B") ==> f (var "A") ==> f (var "B")
+{-
+[fmap : (A B : Type) (A -> B) -> ?A -> ?B]
+((A : Type) (x : ?A) -> fmap (\x.x) x == x) *
+((A B C : Type) (f : B -> c) (g : A -> B) (x : ?A) ->
+  fmap (f . g) x == fmap f (fmap g x))
+
+-}
+maybeFunctor :: Nf
+maybeFunctor =
+  NfSigma "fmap" (functorTy (NfSum NfUnit)) $
+  (NfPi "A" type0 $ NfPi "m" (maybeTy (var "A")) $
+    NfId (maybeTy (var "A"))
+      (var "fmap" @@ var "A" @@ var "A" @@ idFun (var "A") @@ var "m")
+      (var "m"))
+  **
+  (NfPi "A" type0 $ NfPi "B" type0 $ NfPi "C" type0 $
+    NfPi "f" (var "B" ==> var "C") $
+    NfPi "g" (var "A" ==> var "B") $
+    NfPi "m" (maybeTy (var "A")) $
+    NfId (maybeTy (var "C"))
+      (var "fmap" @@ var "A" @@ var "C" @@ comp (var "A") (var "f") (var "g") @@ var "m")
+      (var "fmap" @@ var "B" @@ var "C" @@ var "f" @@
+        (var "fmap" @@ var "A" @@ var "B" @@ var "g" @@ var "m")))
+
 types :: [Nf]
-types =
-  [notInvolTy, plusZero, plusAssoc, plusComm, isEven (numeral 20),
-  isEvenPlusTwo, plusSpec, isMonoid NfNat,
-  identityUnique, inverseUnique]
+types = [maybeFunctor]
+  -- [notInvolTy, plusZero, plusAssoc, plusComm, isEven (numeral 20),
+  -- isEvenPlusTwo, plusSpec, isMonoid NfNat,
+  -- identityUnique, inverseUnique]
+
+{-
+• ⊢ ? : Π(A:Type) A → W (⊤ ⊎ A) (SumInd (UnitInd ⊥) (λ_.⊤))
+(A:Type) ⊢ ? : A → W (⊤ ⊎ A) (SumInd (UnitInd ⊥) (λ_.⊤))
+(A:Type) ⊢ ? : A → W (⊤ ⊎ A) (SumInd (UnitInd ⊥) (λ_.⊤))
+-}
 
 ctx :: Ctx
 ctx = empty
@@ -359,5 +437,6 @@ doSynth t = do
 
 main :: IO ()
 main = do
+  print $ listTy (var "A")
   mapM_ doSynth $ types
   return ()

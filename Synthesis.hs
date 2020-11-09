@@ -60,6 +60,7 @@ synthTy s ctx NfNat           = synthNat s ctx
 synthTy s ctx (NfSum a b)     = synthSum s ctx a b
 synthTy s ctx (NfSigma x a b) = synthPair s ctx x a b
 synthTy s ctx (NfId a x y)    = synthPath s ctx x y
+synthTy s ctx (NfW a b)       = synthInd s ctx a b
 synthTy s ctx _               = []
 
 synthNat :: Int -> Ctx -> [Nf]
@@ -71,6 +72,14 @@ synthSum 0 ctx a b = []
 synthSum s ctx a b =
   [NfInl t b | t <- synth (s-1) ctx a] ++
   [NfInr t a | t <- synth (s-1) ctx b]
+
+synthInd :: Int -> Ctx -> Nf -> Nf -> [Nf]
+synthInd 0 ctx a b = []
+synthInd s ctx a b =
+  [ NfSup a b x u |
+    s1 <- [0..s-1],
+    x <- synth s1 ctx a,
+    u <- synth (s-s1-1) ctx (b @@ x ==> NfW a b) ]
 
 synthPair :: Int -> Ctx -> String -> Nf -> Nf -> [Nf]
 synthPair 0 ctx x a b = []
@@ -130,7 +139,6 @@ synthRec s ctx x (NfSigma y a b) p =
   [ NfProdInd (NfLam x (NfSigma y a b) p) f |
     f <- synth (s-1) ctx (NfPi y a $ NfPi z b $ substNf x (NfPair (var y) (var z)) p) ]
   where
-    z :: String
     z = newName (niceVar b)
           (Map.keysSet ctx `Set.union`
           boundVarsNf p `Set.union`
@@ -142,11 +150,20 @@ synthRec s ctx x NfNat p =
     z <- synth s1 ctx (substNf x NfZero p),
     s <- synth (s-1-s1) ctx sType ]
   where
-    sType :: Nf
-    sType =
-      NfPi y NfNat $ substNf x (var y) p ==> substNf x (NfSuc (var y)) p
-    y :: String
+    sType = NfPi y NfNat $ substNf x (var y) p ==> substNf x (NfSuc (var y)) p
     y = newName "n" (Map.keysSet ctx `Set.union` boundVarsNf p `Set.union` Set.singleton x)
+synthRec s ctx w (NfW a b) p = 
+  [ NfWInd a b (NfLam w (NfW a b) p) f | f <- synth (s-1) ctx fType ]
+  where
+    -- (x : A) (u : B x -> W A B) -> ((b : B x) -> P (u b)) -> P (sup x u)
+    fType =
+      NfPi xV a $
+      NfPi uV (b @@ var xV ==> NfW a b) $
+      (NfPi bV (b @@ var xV) $ substNf w (var uV @@ var bV) p) ==>
+      substNf w (NfSup a b (var xV) (var uV)) p
+    xV = newName "x" (Map.keysSet ctx `Set.union` boundVarsNf p `Set.union` Set.singleton w)
+    uV = newName "u" (Map.keysSet ctx `Set.union` boundVarsNf p `Set.union` Set.singleton w)
+    bV = newName "b" (Map.keysSet ctx `Set.union` boundVarsNf p `Set.union` Set.singleton w)
 synthRec _ _ _ _ _ = []
 
 
