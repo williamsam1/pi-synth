@@ -39,6 +39,7 @@ data Term
   | Id Term Term
   | Cong Term Term | Refl Term | Sym Term | Trans Term Term
   | W Term Term | Sup Term Term Term | WInd Term Term
+  | FunExt Term Term Term
 
 data Nf
   = NfNe Ne
@@ -56,6 +57,7 @@ data Nf
   | NfId Nf Nf Nf
   | NfCong Nf Nf | NfRefl Nf | NfSym Nf | NfTrans Nf Nf
   | NfW Nf Nf | NfSup Nf Nf Nf Nf | NfWInd Nf Nf Nf Nf
+  | NfFunExt Nf Nf Nf
 
 data Ne
   = NeV String
@@ -287,6 +289,8 @@ showNf (NfTrans p q) = withParensNf InfixL p ++ " ∙ " ++ withParensNf Arg q
 showNf (NfW a b) = "W " ++ withParensNf Arg a ++ " " ++ withParensNf Arg b
 showNf (NfSup a b s t) = "sup " ++ withParensNf Arg s ++ " " ++ withParensNf Arg t
 showNf (NfWInd a b p f) = "WInd " ++ withParensNf Arg f
+showNf (NfFunExt f g p) =
+  "FunExt " ++ withParensNf Arg f ++ " " ++ withParensNf Arg g ++ " " ++ withParensNf Arg p
 
 showNe :: Ne -> String
 showNe (NeV x)     = x
@@ -428,6 +432,10 @@ alphaEqRenNf r (NfWInd a b p f) (NfWInd a' b' p' f') =
   alphaEqRenNf r b b' &&
   alphaEqRenNf r p p' &&
   alphaEqRenNf r f f'
+alphaEqRenNf r (NfFunExt f g p) (NfFunExt f' g' p') =
+  alphaEqRenNf r f f' &&
+  alphaEqRenNf r g g' &&
+  alphaEqRenNf r p p'
 alphaEqRenNf r _ _ = False
 
 alphaEqRenNe :: Renaming -> Ne -> Ne -> Bool
@@ -518,6 +526,8 @@ renameNf x y (NfSup a b s t) =
   NfSup (renameNf x y a) (renameNf x y b) (renameNf x y s) (renameNf x y t)
 renameNf x y (NfWInd a b p f) =
   NfWInd (renameNf x y a) (renameNf x y b) (renameNf x y p) (renameNf x y f)
+renameNf x y (NfFunExt f g p) =
+  NfFunExt (renameNf x y f) (renameNf x y g) (renameNf x y p)
 
 renameNe :: String -> String -> Ne -> Ne
 renameNe x y (NeV s)
@@ -585,6 +595,10 @@ freeVarsNf (NfWInd a b p f) =
   freeVarsNf b `Set.union`
   freeVarsNf p `Set.union`
   freeVarsNf f
+freeVarsNf (NfFunExt f g p) = 
+  freeVarsNf f `Set.union`
+  freeVarsNf g `Set.union`
+  freeVarsNf p
 freeVarsNf _ = Set.empty
 
 freeVarsNe :: Ne -> Set.Set String
@@ -659,6 +673,10 @@ boundVarsNf (NfWInd a b p f) =
   boundVarsNf b `Set.union`
   boundVarsNf p `Set.union`
   boundVarsNf f
+boundVarsNf (NfFunExt f g p) = 
+  boundVarsNf f `Set.union`
+  boundVarsNf g `Set.union`
+  boundVarsNf p
 boundVarsNf _ = Set.empty
 
 boundVarsNe :: Ne -> Set.Set String
@@ -802,6 +820,8 @@ substNf x v (NfSup a b s t) =
   NfSup (substNf x v a) (substNf x v b) (substNf x v s) (substNf x v t)
 substNf x v (NfWInd a b p f) =
   NfWInd (substNf x v a) (substNf x v b) (substNf x v p) (substNf x v f)
+substNf x v (NfFunExt f g p) =
+  NfFunExt (substNf x v f) (substNf x v g) (substNf x v p)
 substNf x v t = t
 
 {-
@@ -985,9 +1005,9 @@ asPair :: Nf -> Nf -> Either TypeCheckError (String, Nf, Nf)
 asPair t (NfSigma x a b) = Right (x, a, b)
 asPair t _               = Left (NotAPair t)
 
-asId :: Nf -> Either TypeCheckError (Nf, Nf, Nf)
-asId (NfId a s t) = Right (a, s, t)
-asId t            = Left (NotAnId t)
+idHole :: Nf -> Either TypeCheckError (Nf, Nf, Nf)
+idHole (NfId a s t) = Right (a, s, t)
+idHole t            = Left (NotAnId t)
 
 ofType :: Nf -> Nf -> Nf -> Either TypeCheckError ()
 ofType t a b = 
@@ -1088,7 +1108,7 @@ getTypeNf ctx (NfId a _ _) = do
   Right (NfS s)
 getTypeNf ctx (NfCong f p) = do
   p          <- getTypeNf ctx p
-  (a, x, y)  <- asId p
+  (a, x, y)  <- idHole p
   t          <- getTypeNf ctx f
   (_, _, b)  <- asFun f t
   Right (NfId b (f @@ x) (f @@ y))
@@ -1097,13 +1117,13 @@ getTypeNf ctx (NfRefl t) = do
   Right (NfId a t t)
 getTypeNf ctx (NfSym p) = do
   t <- getTypeNf ctx p
-  (a, x, y) <- asId t
+  (a, x, y) <- idHole t
   Right (NfId a y x)
 getTypeNf ctx (NfTrans p q) = do
   t <- getTypeNf ctx p
-  (a, x, _) <- asId t
+  (a, x, _) <- idHole t
   t <- getTypeNf ctx q
-  (_, _, z) <- asId t
+  (_, _, z) <- idHole t
   Right (NfId a x z)
 getTypeNf ctx (NfW a b) = do
   s1        <- getSortNf ctx a
@@ -1120,6 +1140,9 @@ getTypeNf ctx (NfWInd a b p f) = do
   Right (NfPi x a $ p @@ var x)
   where
     x = freeNameCtx "n" ctx
+getTypeNf ctx (NfFunExt f g p) = do
+  t <- getTypeNf ctx f
+  Right (NfId t f g)
 
 getTypeNe :: Ctx -> Ne -> Either TypeCheckError Nf
 getTypeNe ctx (NeV x) = case lookup x ctx of
@@ -1416,7 +1439,7 @@ eval env ctx (Cong f p) = do
   (a, b) <- asArrowFun f t
   -- C ⊢ p : x == y
   (p, t)     <- eval env ctx p
-  (a', x, y) <- asId t
+  (a', x, y) <- idHole t
   _          <- eqType a a'
   -- C ⊢ Cong f p : f x == f y
   Right (NfCong f p, NfId b (f @@ x) (f @@ y))
@@ -1428,16 +1451,16 @@ eval env ctx (Refl x) = do
 eval env ctx (Sym p) = do
   -- C ⊢ p : x == y
   (p, t) <- eval env ctx p
-  (a, x, y) <- asId t
+  (a, x, y) <- idHole t
   -- C ⊢ Sym p : y == x
   Right (NfSym p, NfId a y x)
 eval env ctx (Trans p q) = do
   -- C ⊢ p : x == y
   (p, t) <- eval env ctx p
-  (a, x, y) <- asId t
+  (a, x, y) <- idHole t
   -- C ⊢ q : y == z
   (q, t) <- eval env ctx q
-  (_, y', z) <- asId t
+  (_, y', z) <- idHole t
   _          <- areEqual y y'
   -- C ⊢ Trans p q : x == z
   Right (NfTrans p q, NfId a x z)
@@ -1490,5 +1513,19 @@ eval env ctx (WInd p f) = do
   wV          <- return $ freeName "w" env ctx
   -- C ⊢ WInd P f : (w : W A B) -> P w
   Right (NfWInd a b p f, NfPi wV (NfW a b) (p @@ var wV))
-
--- WInd Term Term
+eval env ctx (FunExt f g p) = do
+  -- C ⊢ f : (x : A) -> B x
+  (f, t)    <- eval env ctx f
+  (x, a, b) <- asFun f t
+  -- C ⊢ g : (x : A) -> B x
+  (g, t) <- eval env ctx g
+  _      <- ofType g t (NfPi x a b) 
+  -- C ⊢ p : (x : A) -> f x == g x
+  (p, t)       <- eval env ctx p
+  (y, a', t)   <- asFun p t
+  _            <- eqType a' a
+  (by, fy, gy) <- idHole t
+  _            <- areEqual fy (f @@ var y)
+  _            <- areEqual gy (g @@ var y)
+  -- C ⊢ p : FunExt f g p : f == g
+  Right (NfFunExt f g p, NfId (NfPi x a b) f g)

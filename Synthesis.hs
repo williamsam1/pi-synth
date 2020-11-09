@@ -59,7 +59,7 @@ synthTy s ctx NfUnit          = if s == 0 then [NfTT] else []
 synthTy s ctx NfNat           = synthNat s ctx
 synthTy s ctx (NfSum a b)     = synthSum s ctx a b
 synthTy s ctx (NfSigma x a b) = synthPair s ctx x a b
-synthTy s ctx (NfId a x y)    = synthPath s ctx x y
+synthTy s ctx (NfId a x y)    = synthPath s ctx a x y
 synthTy s ctx (NfW a b)       = synthInd s ctx a b
 synthTy s ctx _               = []
 
@@ -423,5 +423,9 @@ synthPath2 s ctx x z = catMaybes
 {-
 synthPath s ctx x y finds proofs that x == y
 -}
-synthPath :: Int -> Ctx -> Nf -> Nf -> [Nf]
-synthPath s ctx x y = synthPath2 s ctx x y
+synthPath :: Int -> Ctx -> Nf -> Nf -> Nf -> [Nf]
+synthPath s ctx (NfPi x a b) f g =
+  [ NfFunExt f g p |
+    p <- synth (s-1) ctx (NfPi x a $ NfId b (f @@ var x) (g @@ var x)) ] ++
+  synthPath2 s ctx f g
+synthPath s ctx a x y = synthPath2 s ctx x y

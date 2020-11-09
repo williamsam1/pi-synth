@@ -414,16 +414,11 @@ maybeFunctor =
         (var "fmap" @@ var "A" @@ var "B" @@ var "g" @@ var "m")))
 
 types :: [Nf]
-types = [maybeFunctor]
+types = [NfId (NfUnit ==> NfUnit) (NfLam "x" NfUnit $ var "x") (NfUnitInd (NfLam "_" NfUnit NfUnit) NfTT)]
   -- [notInvolTy, plusZero, plusAssoc, plusComm, isEven (numeral 20),
   -- isEvenPlusTwo, plusSpec, isMonoid NfNat,
-  -- identityUnique, inverseUnique]
+  -- identityUnique, inverseUnique, maybeFunctor]
 
-{-
-• ⊢ ? : Π(A:Type) A → W (⊤ ⊎ A) (SumInd (UnitInd ⊥) (λ_.⊤))
-(A:Type) ⊢ ? : A → W (⊤ ⊎ A) (SumInd (UnitInd ⊥) (λ_.⊤))
-(A:Type) ⊢ ? : A → W (⊤ ⊎ A) (SumInd (UnitInd ⊥) (λ_.⊤))
--}
 
 ctx :: Ctx
 ctx = empty
@@ -437,6 +432,5 @@ doSynth t = do
 
 main :: IO ()
 main = do
-  print $ listTy (var "A")
   mapM_ doSynth $ types
   return ()
