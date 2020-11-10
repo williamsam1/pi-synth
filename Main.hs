@@ -7,6 +7,7 @@ import System.CPUTime
 import Text.Printf
 
 import Core
+import Typecheck
 import Synthesis
 
 timeIt :: Show a => IO a -> IO a
@@ -376,6 +377,17 @@ lengthTy =
       (var "f" @@ (consTm (var "A") (var "x") (var "xs")))
       (NfSuc (var "f" @@ var "xs")))
 
+isConsTy :: Nf
+isConsTy =
+  NfPi "A" type0 $
+  NfSigma "f" (listTy (var "A") ==> NfNat) $
+  NfId NfNat (var "f" @@ nilTm (var "A")) NfZero **
+  (NfPi "x" (var "A") $ NfPi "xs" (listTy (var "A")) $
+    NfId NfNat
+      (var "f" @@ (consTm (var "A") (var "x") (var "xs")))
+      (NfSuc NfZero))
+
+
 maybeTy :: Nf -> Nf
 maybeTy a = NfSum NfUnit a
 
@@ -414,23 +426,49 @@ maybeFunctor =
         (var "fmap" @@ var "A" @@ var "B" @@ var "g" @@ var "m")))
 
 types :: [Nf]
-types = [NfId (NfUnit ==> NfUnit) (NfLam "x" NfUnit $ var "x") (NfUnitInd (NfLam "_" NfUnit NfUnit) NfTT)]
+types =
+  [ isConsTy ]
   -- [notInvolTy, plusZero, plusAssoc, plusComm, isEven (numeral 20),
   -- isEvenPlusTwo, plusSpec, isMonoid NfNat,
   -- identityUnique, inverseUnique, maybeFunctor]
 
-
 ctx :: Ctx
 ctx = empty
+
+listTyATm :: Term -> Term
+listTyATm a = Sum Unit a
+
+listTyBTm :: Term -> Term
+listTyBTm a =
+  SumInd (Just (Lam "_" (Just (Sum Unit a)) $ S (Type 0)))
+    (Lam "_" (Just Unit) Empty)
+    (Lam "_" (Just a) Unit)
+
+listTyTm :: Term -> Term
+listTyTm a = W (listTyATm a) (listTyBTm a)
+
+nilTerm :: Term -> Term
+nilTerm a = Sup Nothing (Inl TT Nothing) (EmptyInd Nothing)
+
+
+tm :: Term
+tm = 
+  Lam "A" Nothing $
+  WInd Nothing $
+  SumInd (Just (Lam "_" Nothing $ Nat))
+    (Lam "x" Nothing $ Lam "u" Nothing $ Lam "f" Nothing $ Zero)
+    (Lam "x" Nothing $ Lam "u" Nothing $ Lam "f" Nothing $ Zero)
 
 doSynth :: Nf -> IO Nf
 doSynth t = do
   putStrLn $ showCtx ctx ++ " ⊢ ? : " ++ show t
+  putStrLn ""
   t <- timeIt (return $ head $ synthAll ctx t)
   putStrLn ""
   return t
 
 main :: IO ()
 main = do
-  mapM_ doSynth $ types
-  return ()
+  print $ check empty empty (Lam "A" Nothing $ nilTerm (V "A")) (NfPi "A" type0 $ listTy (var "A"))
+  putStrLn ""
+  print $ check empty empty tm (NfPi "A" type0 $ listTy (var "A") ==> NfNat)

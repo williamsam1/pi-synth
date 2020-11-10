@@ -6,6 +6,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 import Core
+import Typecheck
 
 synthAll :: Ctx -> Nf -> [Nf]
 synthAll ctx a = concat [synth s ctx a | s <- [0..]]
@@ -35,7 +36,7 @@ synthNeHelper s ctx ((n, NfSigma x a b, s1):xs) =
     else synthNeHelper s ctx (ys ++ xs)
   where
     ys :: [(Ne, Nf, Int)]
-    ys = [(NeFst n, a, 1+s1), (NeSnd n, substNf x (NfNe (NeFst n)) b, 1+s1)]
+    ys = [(NeFst x a b n, a, 1+s1), (NeSnd x a b n, substNf x (NfNe (NeFst x a b n)) b, 1+s1)]
 synthNeHelper s ctx ((n, t, s1):xs) = 
   (n, t) : synthNeHelper s ctx xs
 
@@ -84,7 +85,7 @@ synthInd s ctx a b =
 synthPair :: Int -> Ctx -> String -> Nf -> Nf -> [Nf]
 synthPair 0 ctx x a b = []
 synthPair s ctx x a b =
-  [NfPair t v | s1 <- [0..s-1], t <- synth s1 ctx a, v <- synth (s-1-s1) ctx (substNf x t b)]
+  [NfPair x a b t v | s1 <- [0..s-1], t <- synth s1 ctx a, v <- synth (s-1-s1) ctx (substNf x t b)]
 
 synthSort :: Int -> Ctx -> Sort -> [Nf]
 synthSort s ctx (Type i) =
@@ -137,7 +138,7 @@ synthRec s ctx x (NfSum a b) p =
           Set.singleton x)
 synthRec s ctx x (NfSigma y a b) p = 
   [ NfProdInd (NfLam x (NfSigma y a b) p) f |
-    f <- synth (s-1) ctx (NfPi y a $ NfPi z b $ substNf x (NfPair (var y) (var z)) p) ]
+    f <- synth (s-1) ctx (NfPi y a $ NfPi z b $ substNf x (NfPair y a b (var y) (var z)) p) ]
   where
     z = newName (niceVar b)
           (Map.keysSet ctx `Set.union`
@@ -216,44 +217,20 @@ subtermNf ctx x y = Nothing
 
 subtermNe :: Ctx -> Ne -> Ne -> Maybe (Maybe Nf)
 subtermNe ctx x y | x == y = Just Nothing
-subtermNe ctx x (NeFst y) = case subtermNe ctx x y of
+subtermNe ctx x (NeFst y a b t) = case subtermNe ctx x t of
   Nothing       -> Nothing
-  Just Nothing  -> Just $ Just $ NfLam v t $ NfNe (NeFst (NeV v))
-  Just (Just f) -> Just $ Just $ NfLam v t $ NfFst z a b @@ (f @@ var v)
+  Just Nothing  -> Just $ Just $ NfLam v ty $ NfNe (NeFst y a b (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v ty $ NfFst y a b @@ (f @@ var v)
   where
-    t :: Nf
-    t = case getTypeNe ctx y of
-      Right t -> t
-    z :: String
-    z = case t of
-      NfSigma z _ _ -> z
-    a :: Nf
-    a = case t of
-      NfSigma _ a _ -> a
-    b :: Nf
-    b = case t of
-      NfSigma _ _ b -> b
-    v :: String
-    v = freeNameCtx (niceVar t) ctx
-subtermNe ctx x (NeSnd y) = case subtermNe ctx x y of
+    ty = NfSigma y a b
+    v = freeNameCtx (niceVar ty) ctx
+subtermNe ctx x (NeSnd y a b t) = case subtermNe ctx x t of
   Nothing       -> Nothing
-  Just Nothing  -> Just $ Just $ NfLam v t $ NfNe (NeSnd (NeV v))
-  Just (Just f) -> Just $ Just $ NfLam v t $ NfSnd z a b @@ (f @@ var v)
+  Just Nothing  -> Just $ Just $ NfLam v ty $ NfNe (NeSnd y a b (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v ty $ NfSnd y a b @@ (f @@ var v)
   where
-    t :: Nf
-    t = case getTypeNe ctx y of
-      Right t -> t
-    z :: String
-    z = case t of
-      NfSigma z _ _ -> z
-    a :: Nf
-    a = case t of
-      NfSigma _ a _ -> a
-    b :: Nf
-    b = case t of
-      NfSigma _ _ b -> b
-    v :: String
-    v = freeNameCtx (niceVar t) ctx
+    ty = NfSigma y a b
+    v = freeNameCtx (niceVar ty) ctx
 subtermNe ctx x (NeEmptyInd p y) =
   case subtermNe ctx x y of
   Nothing       -> Nothing
