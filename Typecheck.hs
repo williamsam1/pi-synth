@@ -325,7 +325,7 @@ and
   e[env] => v
 -}
 infer :: Env -> Ctx -> Term -> Either TypeCheckError (Nf, Nf)
-infer env ctx (S s) = case axioms s of
+infer env ctx (Sort s) = case axioms s of
   Just s2 -> Right (NfS s, NfS s2)
   Nothing -> Left (NoAxiom s)
 infer env ctx (V x) = case lookup x ctx of

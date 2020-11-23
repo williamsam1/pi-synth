@@ -27,7 +27,7 @@ rules (Type i) (Type j) = Just (Type (max i j))
 
 -- Raw terms with partial type annotations
 data Term
-  = S Sort
+  = Sort Sort
   | V String
   | Pi String Term Term
   | Lam String (Maybe Term) Term
@@ -246,9 +246,9 @@ showNf (NfS s)       = show s
 showNf (NfLam x a t) = showLam x a t
 showNf (NfPi x a b)  = showPi x a b
 showNf NfEmpty       = "⊥"
-showNf (NfEmptyInd p) = "()" -- "absurd" -- "EmptyInd " ++ withParensNf Arg p
-showNf NfUnit        = "⊤"
-showNf NfTT          = "tt"
+showNf (NfEmptyInd p) = "!" -- "absurd" -- "EmptyInd " ++ withParensNf Arg p
+showNf NfUnit         = "⊤"
+showNf NfTT           = "tt"
 showNf (NfUnitInd p t) =
   "UnitInd " ++ withParensNf Arg t
   -- "UnitInd " ++
