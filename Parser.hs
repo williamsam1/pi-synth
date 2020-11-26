@@ -38,7 +38,7 @@ data Input
   | InpCong Input Input
   | InpEmpty | InpAbsurd
   | InpUnit | InpTT | InpUnitInd Input
-  | InpNat | InpZero | InpSuc Input
+  | InpNat | InpZero | InpSuc Input | InpNatInd Input Input
   deriving (Eq,Show)
 
 showAsc :: String -> String -> [([String], Input)] -> String
@@ -73,6 +73,7 @@ prettyPrint (InpInr t)  = "inr (" ++ prettyPrint t ++ ")"
 prettyPrint InpNat      = "Nat"
 prettyPrint InpZero     = "0"
 prettyPrint (InpSuc t)  = "suc (" ++ prettyPrint t ++ ")"
+prettyPrint (InpNatInd s t)  = "NatInd (" ++ prettyPrint s ++ ") (" ++ prettyPrint s ++ ")"
 
 data Nat = Z | S Nat
 
@@ -134,7 +135,7 @@ builtin n expr name f = name *> fmapN f (repeatN n expr)
 reserved :: HS.HashSet String
 reserved = HS.fromList $
   reflTokens ++ equalTokens ++ lambdaTokens ++ colonTokens ++
-  arrowTokens ++ transTokens ++
+  arrowTokens ++ transTokens ++ zeroTokens ++ sucTokens ++ natTokens ++
   ["*", "+", "(", ")", "[", "]"]
 
 paren :: Prod r String String t -> Prod r String String t
@@ -258,6 +259,12 @@ sucTokens = ["suc"]
 sucProd :: Prod r String String String
 sucProd = tokens sucTokens
 
+natIndTokens :: [String]
+natIndTokens = ["NatInd"]
+
+natIndProd :: Prod r String String String
+natIndProd = tokens natIndTokens
+
 {-
 (identifier) id  ::= [a-z,A-Z][a-z,A-Z,0-9]*
 (ascription) asc ::= id+ ":" e
@@ -319,6 +326,8 @@ grammar = mdo
               <?> "zero"
   sucTm     <- rule $ builtin (SS SZ) expr sucProd InpSuc
               <?> "successor"
+  natIndTm  <- rule $ builtin (SS $ SS SZ) expr natIndProd InpNatInd
+              <?> "nat induction"
   expr <- rule
      $  piTy <|> sigTy <|> lam
     <|> prod <|> sum <|> arrTy <|> app <|> eq
@@ -326,7 +335,7 @@ grammar = mdo
     <|> emptyTm <|> absurdTm
     <|> unitTm <|> ttTm <|> unitIndTm
     <|> inlTm <|> inrTm
-    <|> natTy <|> zeroTm <|> sucTm
+    <|> natTy <|> zeroTm <|> sucTm <|> natIndTm
     <|> InpV <$> ident
     <|> paren expr
   return expr
@@ -455,6 +464,7 @@ desugar InpTT = TT
 desugar InpNat = Nat
 desugar InpZero = Zero
 desugar (InpSuc n) = Suc (desugar n)
+desugar (InpNatInd s t) = NatInd Nothing (desugar s) (desugar t)
 desugar (InpUnitInd t) = UnitInd Nothing (desugar t)
 desugar (InpInl t) = Inl (desugar t) Nothing
 desugar (InpInr t) = Inr (desugar t) Nothing
@@ -495,3 +505,5 @@ main = do
   print $ desugar <$> parseTerm xs
   putStrLn ""
   print $ infer Map.empty Map.empty <$> desugar <$> parseTerm xs
+  putStrLn ""
+  print $ flip (check Map.empty Map.empty) (NfNat ==> NfNat) <$> desugar <$> parseTerm xs
