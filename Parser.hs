@@ -5,6 +5,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses, AllowAmbiguousTypes #-}
+
+module Parser where
 
 import Control.Applicative
 import Control.Arrow(first,second)
@@ -28,6 +31,7 @@ data Input
   | InpLam [([String], Maybe Input)] Input
   | InpSig [([String], Input)] Input
   | InpProd [Input] Input
+  | InpPair [Input] Input
   | InpSum [Input] Input
   | InpInl Input | InpInr Input
   | InpArrow [Input] Input
@@ -58,6 +62,7 @@ prettyPrint (InpLam arg b)  = "λ" ++ showArg arg ++ " → " ++ prettyPrint b
 prettyPrint (InpSig asc b)  = showAsc "[" "]" asc ++ " " ++ prettyPrint b
 prettyPrint (InpArrow as b) = intercalate " → " (map prettyPrint (as ++ [b]))
 prettyPrint (InpProd as b)  = intercalate " * " (map prettyPrint (as ++ [b]))
+prettyPrint (InpPair as b)  = intercalate " , " (map prettyPrint (as ++ [b]))
 prettyPrint (InpSum as b)   = intercalate " + " (map prettyPrint (as ++ [b]))
 prettyPrint (InpApp as b)   = intercalate " " (map prettyPrint (as ++ [b]))
 prettyPrint (InpEq a b)     = prettyPrint a ++ " == " ++ prettyPrint b
@@ -136,7 +141,8 @@ reserved :: HS.HashSet String
 reserved = HS.fromList $
   reflTokens ++ equalTokens ++ lambdaTokens ++ colonTokens ++
   arrowTokens ++ transTokens ++ zeroTokens ++ sucTokens ++ natTokens ++
-  ["*", "+", "(", ")", "[", "]"]
+  emptyTokens ++ absurdTokens ++ unitTokens ++ ttTokens ++ unitIndTokens ++ 
+  [",", "*", "+", "(", ")", "[", "]"]
 
 paren :: Prod r String String t -> Prod r String String t
 paren p = namedToken "(" *> p <* namedToken ")"
@@ -150,6 +156,12 @@ ident = satisfy (not . (`HS.member` reserved))
 
 tokens :: [String] -> Prod r String String String
 tokens xs = foldr (<|>) empty $ namedToken <$> xs
+
+defEqTokens :: [String]
+defEqTokens = [":="]
+
+defEq :: Prod r String String String
+defEq = tokens defEqTokens
 
 equalTokens :: [String]
 equalTokens = ["=="]
@@ -192,6 +204,18 @@ colonTokens = [":"]
 
 colon :: Prod r String String String
 colon = tokens colonTokens
+
+doublecolonTokens :: [String]
+doublecolonTokens = ["::"]
+
+doublecolon :: Prod r String String String
+doublecolon = tokens doublecolonTokens
+
+questioncolonTokens :: [String]
+questioncolonTokens = ["?:"]
+
+questioncolon :: Prod r String String String
+questioncolon = tokens questioncolonTokens
 
 absurdTokens :: [String]
 absurdTokens = ["!"]
@@ -265,6 +289,12 @@ natIndTokens = ["NatInd"]
 natIndProd :: Prod r String String String
 natIndProd = tokens natIndTokens
 
+commaTokens :: [String]
+commaTokens = [","]
+
+commaProd :: Prod r String String String
+commaProd = tokens commaTokens
+
 {-
 (identifier) id  ::= [a-z,A-Z][a-z,A-Z,0-9]*
 (ascription) asc ::= id+ ":" e
@@ -275,9 +305,8 @@ natIndProd = tokens natIndTokens
 (operations) op  ::= "+" | "*" | "->" | "=="
 (expression) e   ::= pi | sig | lam | e e | e op e
 -}
-
-grammar :: Grammar r (Prod r String String Input)
-grammar = mdo
+expr :: Grammar r (Prod r String String Input)
+expr = mdo
   asc       <- rule $ (,) <$> some ident <* colon <*> expr
               <?> "ascription"
   piTy      <- rule $ InpPi <$> some (paren asc) <* arrow <*> expr
@@ -328,6 +357,8 @@ grammar = mdo
               <?> "successor"
   natIndTm  <- rule $ builtin (SS $ SS SZ) expr natIndProd InpNatInd
               <?> "nat induction"
+  pairTm    <- rule $ InpPair <$> some (expr <* commaProd) <*> expr
+              <?> "pair"
   expr <- rule
      $  piTy <|> sigTy <|> lam
     <|> prod <|> sum <|> arrTy <|> app <|> eq
@@ -336,6 +367,7 @@ grammar = mdo
     <|> unitTm <|> ttTm <|> unitIndTm
     <|> inlTm <|> inrTm
     <|> natTy <|> zeroTm <|> sucTm <|> natIndTm
+    <|> pairTm
     <|> InpV <$> ident
     <|> paren expr
   return expr
@@ -349,7 +381,7 @@ tokenize (x:xs)
   | otherwise             = (x:as) : tokenize bs
   where
     (as, bs) = break (`HS.member` special) xs
-    special = HS.fromList "()[],\\ \n"
+    special = HS.fromList ",()[],\\ \n"
 
 safeHead :: [a] -> Maybe a
 safeHead []    = Nothing
@@ -371,32 +403,39 @@ precedence (InpSuc _)     = 1
 precedence (InpEq _ _)    = 2
 precedence (InpSum _ _)   = 3
 precedence (InpArrow _ _) = 4
-precedence (InpProd _ _)  = 5
-precedence (InpSig _ _)   = 6
-precedence (InpPi _ _)    = 7
-precedence (InpLam _ _)   = 8
+precedence (InpLam _ _)   = 5
+precedence (InpProd _ _)  = 6
+precedence (InpSig _ _)   = 7
+precedence (InpPi _ _)    = 8
 precedence _ = 9
 
 whichParse :: Input -> Input -> Bool
-whichParse (InpLam a b)   (InpLam a' b')   = whichParse b b'
-whichParse (InpPi a b)    (InpPi a' b')    = whichParse b b'
-whichParse (InpSig a b)   (InpSig a' b')   = whichParse b b'
-whichParse (InpProd a b)  (InpProd a' b')  = whichParse b b'
-whichParse (InpSum a b)   (InpSum a' b')   = whichParse b b'
-whichParse (InpArrow a b) (InpArrow a' b') = whichParse b b'
-whichParse (InpEq a b)    (InpEq a' b')    = whichParse b b'
-whichParse (InpApp a b)   (InpApp a' b')   = whichParse b b'
-whichParse (InpRefl a)    (InpRefl a')     = whichParse a a'
-whichParse (InpTrans a b) (InpTrans a' b') = whichParse b b'
-whichParse (InpSuc a)     (InpSuc a')      = whichParse a a'
-whichParse s t = if precedence t >= precedence s then True else False
+whichParse (InpLam a b)    (InpLam a' b')    = whichParse b b'
+whichParse (InpPi a b)     (InpPi a' b')     = whichParse b b'
+whichParse (InpSig a b)    (InpSig a' b')    = whichParse b b'
+whichParse (InpProd a b)   (InpProd a' b')   = whichParse b b'
+whichParse (InpSum a b)    (InpSum a' b')    = whichParse b b'
+whichParse (InpArrow a b)  (InpArrow a' b')  = whichParse b b'
+whichParse (InpEq a b)     (InpEq a' b')     = whichParse b b'
+whichParse (InpApp a b)    (InpApp a' b')    = whichParse b b'
+whichParse (InpRefl a)     (InpRefl a')      = whichParse a a'
+whichParse (InpSym a)      (InpSym a')       = whichParse a a'
+whichParse (InpTrans a b)  (InpTrans a' b')  = whichParse b b'
+whichParse (InpCong a b)   (InpCong a' b')   = whichParse b b'
+whichParse (InpSuc a)      (InpSuc a')       = whichParse a a'
+whichParse (InpInl a)      (InpInl a')       = whichParse a a'
+whichParse (InpInr a)      (InpInr a')       = whichParse a a'
+whichParse (InpUnitInd a)  (InpUnitInd a')   = whichParse a a'
+whichParse (InpNatInd a b) (InpNatInd a' b') = whichParse b b'
+whichParse (InpPair a b)   (InpPair a' b')   = whichParse b b'
+whichParse s t = precedence t >= precedence s
 
 selectParse :: Input -> Input -> Input
 selectParse s t = if whichParse s t then t else s
 
 parseTerm :: String -> Either (Report String [String]) Input
 parseTerm xs =
-  let (ps,r) = fullParses (parser grammar) $ tokenize xs in
+  let (ps,r) = fullParses (parser expr) $ tokenize xs in
   case foldl (\m t -> Just $ maybe t (selectParse t) m) Nothing ps of
     Nothing -> Left r
     Just p  -> Right p
@@ -414,6 +453,10 @@ desugarSig (((x:xs),a):asc) b = Sigma x (desugar a) (desugarSig ((xs,a):asc) b)
 desugarProd :: [Input] -> Input -> Term
 desugarProd [] b     = desugar b
 desugarProd (a:as) b = Sigma "_" (desugar a) (desugarProd as b)
+
+desugarPair :: [Input] -> Input -> Term
+desugarPair [] b     = desugar b
+desugarPair (a:as) b = Pair Nothing (desugar a) (desugarPair as b)
 
 desugarSum :: [Input] -> Input -> Term
 desugarSum [] b     = desugar b
@@ -450,6 +493,7 @@ desugar (InpPi a b)    = desugarPi a b
 desugar (InpLam a b)   = desugarLam a b
 desugar (InpSig a b)   = desugarSig a b
 desugar (InpProd a b)  = desugarProd a b
+desugar (InpPair a b)  = desugarPair a b
 desugar (InpSum a b)   = desugarSum a b
 desugar (InpArrow a b) = desugarArrow a b
 desugar (InpEq a b)    = Id Nothing (desugar a) (desugar b)
@@ -458,7 +502,7 @@ desugar (InpSym p)     = Sym (desugar p)
 desugar (InpTrans a b) = desugarTrans a b
 desugar (InpCong f p)  = Cong (desugar f) (desugar p)
 desugar InpEmpty       = Empty
-desugar InpAbsurd      = EmptyInd Nothing
+desugar InpAbsurd      = Absurd Nothing
 desugar InpUnit = Unit
 desugar InpTT = TT
 desugar InpNat = Nat
@@ -469,41 +513,3 @@ desugar (InpUnitInd t) = UnitInd Nothing (desugar t)
 desugar (InpInl t) = Inl (desugar t) Nothing
 desugar (InpInr t) = Inr (desugar t) Nothing
 
-{-
-  | InpArrow [Input] Input
-  | InpAbsurd
-
-data Term
-  = S Sort
-  | V String
-  | Pi String Term Term
-  | Lam String (Maybe Term) Term
-  | App Term Term
-  | Empty | EmptyInd (Maybe Term)
-  | Unit | TT | UnitInd (Maybe Term) Term
-  | Sum Term Term | Inl Term (Maybe Term) | Inr Term (Maybe Term)
-  | SumInd (Maybe Term) Term Term
-  | Sigma String Term Term | Pair (Maybe (String,Term,Term)) Term Term
-  | ProdInd (Maybe Term) Term | Fst (Maybe (String,Term,Term)) Term | Snd (Maybe (String,Term,Term)) Term
-  | Nat | Zero | Suc Term
-  | NatInd (Maybe Term) Term Term
-  | Id (Maybe Term) Term Term
-  | Cong Term Term | Refl Term | Sym Term | Trans Term Term
-  | W Term Term | Sup (Maybe (Term,Term)) Term Term | WInd (Maybe Term) Term
-  | FunExt (Maybe (Term,Term)) Term
-  deriving (Eq, Show)
--}
-main :: IO ()
-main = do
-  xs:_ <- getArgs
-  print $ tokenize xs
-  (ps, r) <- return $ fullParses (parser grammar) $ tokenize xs
-  mapM_ print ps
-  putStrLn ""
-  print $ parseTerm xs
-  putStrLn ""
-  print $ desugar <$> parseTerm xs
-  putStrLn ""
-  print $ infer Map.empty Map.empty <$> desugar <$> parseTerm xs
-  putStrLn ""
-  print $ flip (check Map.empty Map.empty) (NfNat ==> NfNat) <$> desugar <$> parseTerm xs

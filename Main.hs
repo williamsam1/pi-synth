@@ -27,9 +27,6 @@ timeItT ioa = do
 constTm :: Nf -> Nf -> Nf
 constTm a t = NfLam "_" a t
 
-absurdTm :: Nf -> Nf
-absurdTm a = NfEmptyInd (NfLam "_" NfEmpty a)
-
 unitRec :: Nf -> Nf -> Nf
 unitRec a t = NfUnitInd (constTm NfUnit a) t
 
@@ -360,7 +357,7 @@ listTy a = NfW (listTyA a) (listTyB a)
 -- nil a = sup (inl tt) () : List A
 nilTm :: Nf -> Nf
 nilTm a =
-  NfSup (listTyA a) (listTyB a) (NfInl NfTT a) (absurdTm a)
+  NfSup (listTyA a) (listTyB a) (NfInl NfTT a) (NfAbsurd a)
 
 -- cons a x xs = sup (inr x) (\_ -> xs)
 consTm :: Nf -> Nf -> Nf -> Nf
@@ -387,6 +384,11 @@ isConsTy =
       (var "f" @@ (consTm (var "A") (var "x") (var "xs")))
       (NfSuc NfZero))
 
+zeroOrSuc :: Nf
+zeroOrSuc =
+  NfPi "x" NfNat $
+    (NfId NfNat (var "x") NfZero) ||
+    (NfSigma "y" NfNat $ NfId NfNat (var "x") (NfSuc (var "y")))
 
 maybeTy :: Nf -> Nf
 maybeTy a = NfSum NfUnit a
@@ -440,7 +442,7 @@ listTyATm a = Sum Unit a
 
 listTyBTm :: Term -> Term
 listTyBTm a =
-  SumInd (Just (Lam "_" (Just (Sum Unit a)) $ S (Type 0)))
+  SumInd (Just (Lam "_" (Just (Sum Unit a)) $ Sort (Type 0)))
     (Lam "_" (Just Unit) Empty)
     (Lam "_" (Just a) Unit)
 
@@ -448,8 +450,7 @@ listTyTm :: Term -> Term
 listTyTm a = W (listTyATm a) (listTyBTm a)
 
 nilTerm :: Term -> Term
-nilTerm a = Sup Nothing (Inl TT Nothing) (EmptyInd Nothing)
-
+nilTerm a = Sup Nothing (Inl TT Nothing) (Absurd Nothing)
 
 tm :: Term
 tm = 
@@ -458,6 +459,7 @@ tm =
   SumInd (Just (Lam "_" Nothing $ Nat))
     (Lam "x" Nothing $ Lam "u" Nothing $ Lam "f" Nothing $ Zero)
     (Lam "x" Nothing $ Lam "u" Nothing $ Lam "f" Nothing $ Zero)
+
 
 doSynth :: Nf -> IO Nf
 doSynth t = do
@@ -469,6 +471,17 @@ doSynth t = do
 
 main :: IO ()
 main = do
-  print $ check empty empty (Lam "A" Nothing $ nilTerm (V "A")) (NfPi "A" type0 $ listTy (var "A"))
-  putStrLn ""
-  print $ check empty empty tm (NfPi "A" type0 $ listTy (var "A") ==> NfNat)
+  print $ head $ synthAll empty maxSpec
+  -- do
+  -- print $ check empty empty (Lam "A" Nothing $ nilTerm (V "A")) (NfPi "A" type0 $ listTy (var "A"))
+  -- putStrLn ""
+  -- print $ check empty empty tm (NfPi "A" type0 $ listTy (var "A") ==> NfNat)
+
+{-
+isDiscreteNat : (m n : Nat) -> (m == n) + (m == n -> Empty)
+isDiscreteNat 0       0       = inl refl
+isDiscreteNat 0       (suc n) = inr (\p -> 0!=suc p)
+isDiscreteNat (suc m) 0       = inr (\p -> 0!=suc (sym p))
+isDiscreteNat (suc m) (suc n) =
+  Ind+ (\p -> inl (cong suc p)) (\~p -> inr (\p -> ~p (sucInj p)))
+-}

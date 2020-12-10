@@ -10,7 +10,7 @@ import Core
 
 -- Descriptive errors for type checking
 data TypeCheckError
-  = NoAxiom Sort | NoRule Sort Sort | NotInCtx String
+  = NoAxiom Sort | NoRule Sort Sort | NotInCtx String Ctx
   | NotAType Nf | NotASort Nf | NotAFunction Nf | NotOfType Nf Nf
   | NotEqType Nf Nf | NotASum Nf | NotASigma Nf | NotAPi Nf
   | NotAnArrow Nf | NotAnId Nf | NotAPair Nf | NotEqual Nf Nf
@@ -19,7 +19,7 @@ data TypeCheckError
 instance Show TypeCheckError where
   show (NoAxiom s)      = "No axiom for the sort " ++ show s
   show (NoRule s1 s2)   = "No rule for the sorts " ++ show s1 ++ " " ++ show s2
-  show (NotInCtx x)     = "Variable " ++ x ++ " is not in context"
+  show (NotInCtx x c)   = "Variable " ++ x ++ " is not in context\n" ++ showCtx c
   show (NotAType t)     = "Term " ++ show t ++ " is not a type"
   show (NotASort t)     = "Term " ++ show t ++ " is not a sort"
   show (NotAFunction t) = "Term " ++ show t ++ " is not a function"
@@ -124,12 +124,7 @@ getTypeNf ctx (NfPi x a b) = do
     Nothing -> Left (NoRule s1 s2)
     Just s  -> Right (NfS s)
 getTypeNf ctx NfEmpty = Right (NfS (Type 0))
-getTypeNf ctx (NfEmptyInd p) = do
-  a         <- getTypeNf ctx p
-  (x, a, b) <- asFun p a
-  Right (NfPi x NfEmpty $ p @@ var x)
-  where
-    x = freeNameCtx "e" ctx
+getTypeNf ctx (NfAbsurd a) = Right (NfEmpty ==> a)
 getTypeNf ctx NfUnit = Right (NfS (Type 0))
 getTypeNf ctx NfTT = Right NfUnit
 getTypeNf ctx (NfUnitInd p _) = do
@@ -229,13 +224,13 @@ getTypeNf ctx (NfFunExt f g p) = do
 
 getTypeNe :: Ctx -> Ne -> Either TypeCheckError Nf
 getTypeNe ctx (NeV x) = case lookup x ctx of
-  Nothing -> Left (NotInCtx x)
+  Nothing -> Left (NotInCtx x ctx)
   Just a  -> Right a
 getTypeNe ctx (NeApp n t) = do
   t         <- getTypeNe ctx n
   (x, a, b) <- asFun (NfNe n) t
   Right (substNf x t b)
-getTypeNe ctx (NeEmptyInd p n) = Right (p @@ NfNe n)
+getTypeNe ctx (NeAbsurd a n) = Right a
 getTypeNe ctx (NeUnitInd p _ n) = Right (p @@ NfNe n)
 getTypeNe ctx (NeSumInd p _ _ n) = Right (p @@ NfNe n)
 getTypeNe ctx (NeProdInd p _ n) = Right (p @@ NfNe n)
@@ -281,17 +276,14 @@ getSortNf ctx t = Left (NotAType t)
 
 getSortNe :: Ctx -> Ne -> Either TypeCheckError Sort
 getSortNe ctx (NeV x) = case lookup x ctx of
-  Nothing      -> Left (NotInCtx x)
+  Nothing      -> Left (NotInCtx x ctx)
   Just (NfS s) -> Right s
   Just _       -> Left (NotAType (NfNe (NeV x)))
 getSortNe ctx (NeApp n _) = do
   a         <- getTypeNe ctx n
   (x, a, b) <- asFun (NfNe n) a
   asSort b
-getSortNe ctx (NeEmptyInd p _) = do
-  a         <- getTypeNf ctx p
-  (x, a, b) <- asFun p a
-  asSort b
+getSortNe ctx (NeAbsurd a _) = getSortNf ctx a
 getSortNe ctx (NeUnitInd p _ _) = do
   a         <- getTypeNf ctx p
   (x, a, b) <- asFun p a
@@ -332,7 +324,7 @@ infer env ctx (V x) = case lookup x ctx of
   Just a  -> Right (NfNe (NeV x), a)
   Nothing -> case lookup x env of
     Just (t, a) -> Right (t, a)
-    Nothing     -> Left (NotInCtx x)
+    Nothing     -> Left (NotInCtx x ctx)
 infer env ctx (Pi x a b) = do
   -- C ⊢ A : Type i
   (a, s1) <- infer env ctx a
@@ -361,15 +353,12 @@ infer env ctx (App f t) = do
   -- C ⊢ f t : B[t/x]
   Right (f @@ t, substNf x t b)
 infer env ctx Empty = Right (NfEmpty, type0) -- C ⊢ Empty : Type 0
-infer env ctx (EmptyInd (Just p)) = do
-  -- C ⊢ P : Empty -> Type i
-  (p, t)    <- infer env ctx p
-  (_, a, s) <- asFun p t
-  _         <- eqType a NfEmpty
+infer env ctx (Absurd (Just a)) = do
+  -- C ⊢ A : Type i
+  (a, s)    <- infer env ctx a
   _         <- asSort s
-  -- C ⊢ EmptyInd P : (e : Empty) -> P e
-  e         <- return $ freeName "e" env ctx
-  Right (NfEmptyInd p, NfPi e NfEmpty (p @@ var e))
+  -- C ⊢ Absurd A : Empty -> A
+  Right (NfAbsurd a, NfEmpty ==> a)
 infer env ctx Unit  = Right (NfUnit, type0) -- C ⊢ Unit : Type 0
 infer env ctx TT    = Right (NfTT, NfUnit) -- C ⊢ tt : Unit
 infer env ctx (UnitInd (Just p) ptt) = do
@@ -516,6 +505,12 @@ infer env ctx (NatInd (Just p) z s) = do
   n          <- return $ freeName "n" env ctx
   -- C ⊢ NatInd P z s : (n : Nat) -> P n
   Right (NfNatInd p z s, NfPi n NfNat (p @@ var n))
+infer env ctx (NatInd Nothing z s) = do
+  -- C ⊢ z : A
+  (z, a)     <- infer env ctx z
+  -- C ⊢ s : Nat -> A -> A
+  s     <- check env ctx s (NfNat ==> a ==> a)
+  Right (NfNatInd (NfLam "_" NfNat $ a) z s, NfNat ==> a)
 infer env ctx (Id Nothing x y) = do
   -- C ⊢ x : A
   (x, a)  <- infer env ctx x
@@ -668,9 +663,10 @@ check env ctx (Sup _ x u) (NfW a b) = do
   x <- check env ctx x a
   u <- check env ctx u (b @@ x ==> NfW a b)
   Right (NfSup a b x u)
-check env ctx (EmptyInd _) (NfPi x NfEmpty px) = do
-  -- C ⊢ EmptyInd : (x : Empty) -> P x
-  Right (NfEmptyInd (NfLam x NfEmpty px))
+check env ctx (Absurd _) (NfPi x NfEmpty a) = do
+  -- C ⊢ Absurd : Empty -> A
+  _ <- getSortNf ctx a
+  Right (NfAbsurd a)
 check env ctx (UnitInd _ t) (NfPi x NfUnit px) = do
   -- C ⊢ t : P tt
   t <- check env ctx t (substNf x NfTT px)

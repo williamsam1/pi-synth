@@ -5,6 +5,9 @@ Dependent (Π) type-(Gu)ided (S)ynthesis
 Files
 -------
 - Core.hs - Core language definitions
-- Typecheck.hs - Type checking/inference and normalization procedure
+- Main.hs - Main module, currently contains example syntheis procedures
+- Parser.hs - Parser for core type theory
+- REPL.hs - REPL loop including synthesis commands
 - Synthesis.hs - Type-directed, enumerative synthesis procedure
-- Main.hs - Main module, currently contains example syntheis procedures. Planning to add REPL or file parsing capabilities
+- Typecheck.hs - Type checking/inference and normalization procedure
+

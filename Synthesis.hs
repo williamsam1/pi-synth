@@ -50,7 +50,16 @@ synthAllNe s ctx = synthNeHelper s ctx [(NeV x, t, 0) | (x, t) <- toList ctx]
 
 -- Context-guided search (neutral forms)
 synthNe :: Int -> Ctx -> Nf -> [Nf]
-synthNe s ctx a = [NfNe n | (n, t) <- synthAllNe s ctx, t == a]
+synthNe s ctx a = direct ++ absurd
+  where
+    allNe :: [(Ne, Nf)]
+    allNe = synthAllNe s ctx
+
+    direct :: [Nf]
+    direct = [NfNe n | (n, t) <- allNe, t == a]
+
+    absurd :: [Nf]
+    absurd = [NfNe (NeAbsurd a n) | (n, t) <- allNe, t == NfEmpty]
 
 -- Type-guided search (introduction forms)
 synthTy :: Int -> Ctx -> Nf -> [Nf]
@@ -116,7 +125,7 @@ synthLam s ctx x a b = [NfLam y a t | t <- synth (s-1) (insert y a ctx) b]
 
 -- Synthesize product with an induction principle
 synthRec :: Int -> Ctx -> String -> Nf -> Nf -> [Nf]
-synthRec s ctx x NfEmpty p = if s == 0 then [NfEmptyInd (NfLam x NfUnit p)] else []
+synthRec s ctx x NfEmpty p = if s == 0 then [NfLam x NfEmpty (NfNe $ NeAbsurd p (NeV x))] else []
 synthRec s ctx x NfUnit p = 
   [ NfUnitInd (NfLam x NfUnit p) t |
     t <- synth (s-1) ctx (substNf x NfTT p) ]
@@ -231,11 +240,11 @@ subtermNe ctx x (NeSnd y a b t) = case subtermNe ctx x t of
   where
     ty = NfSigma y a b
     v = freeNameCtx (niceVar ty) ctx
-subtermNe ctx x (NeEmptyInd p y) =
+subtermNe ctx x (NeAbsurd a y) =
   case subtermNe ctx x y of
   Nothing       -> Nothing
-  Just Nothing  -> Just $ Just $ NfLam v NfEmpty $ NfNe (NeEmptyInd p (NeV v))
-  Just (Just f) -> Just $ Just $ NfLam v NfEmpty $ NfEmptyInd p @@ (f @@ var v)
+  Just Nothing  -> Just $ Just $ NfLam v NfEmpty $ NfNe (NeAbsurd a (NeV v))
+  Just (Just f) -> Just $ Just $ NfLam v NfEmpty $ NfAbsurd a @@ (f @@ var v)
   where
     v :: String
     v = freeNameCtx (niceVar NfEmpty) ctx

@@ -32,7 +32,7 @@ data Term
   | Pi String Term Term
   | Lam String (Maybe Term) Term
   | App Term Term
-  | Empty | EmptyInd (Maybe Term)
+  | Empty | Absurd (Maybe Term)
   | Unit | TT | UnitInd (Maybe Term) Term
   | Sum Term Term | Inl Term (Maybe Term) | Inr Term (Maybe Term)
   | SumInd (Maybe Term) Term Term
@@ -51,7 +51,7 @@ data Nf
   = NfNe Ne
   | NfS Sort
   | NfLam String Nf Nf | NfPi String Nf Nf
-  | NfEmpty | NfEmptyInd Nf
+  | NfEmpty | NfAbsurd Nf
   | NfUnit | NfTT | NfUnitInd Nf Nf
   | NfSum Nf Nf | NfInl Nf Nf | NfInr Nf Nf | NfSumInd Nf Nf Nf
   | NfSigma String Nf Nf | NfPair String Nf Nf Nf Nf
@@ -65,7 +65,7 @@ data Nf
 data Ne
   = NeV String
   | NeApp Ne Nf
-  | NeEmptyInd Nf Ne
+  | NeAbsurd Nf Ne
   | NeUnitInd Nf Nf Ne
   | NeSumInd Nf Nf Nf Ne
   | NeProdInd Nf Nf Ne | NeFst String Nf Nf Ne | NeSnd String Nf Nf Ne
@@ -152,7 +152,7 @@ needsParensNf p (NfSum _ _)   = True
 needsParensNf p (NfInl _ _)   = True
 needsParensNf p (NfInr _ _)   = True
 needsParensNf p (NfUnitInd _ _) = True
-needsParensNf p (NfEmptyInd _) = False
+needsParensNf p (NfAbsurd _) = False
 needsParensNf p (NfSumInd _ _ _) = True
 needsParensNf p (NfProdInd _ _) = True
 needsParensNf p (NfNatInd _ _ _) = True
@@ -175,7 +175,7 @@ needsParensNf Arg    _             = True
 needsParensNe :: Position -> Ne -> Bool
 needsParensNe p (NeV _) = False
 needsParensNe p (NeUnitInd _ _ _) = True
-needsParensNe p (NeEmptyInd _ _) = True
+needsParensNe p (NeAbsurd _ _) = True
 needsParensNe p (NeSumInd _ _ _ _) = True
 needsParensNe p (NeProdInd _ _ _) = True
 needsParensNe p (NeNatInd _ _ _ _) = True
@@ -246,7 +246,7 @@ showNf (NfS s)       = show s
 showNf (NfLam x a t) = showLam x a t
 showNf (NfPi x a b)  = showPi x a b
 showNf NfEmpty       = "⊥"
-showNf (NfEmptyInd p) = "!" -- "absurd" -- "EmptyInd " ++ withParensNf Arg p
+showNf (NfAbsurd p) = "!" -- "absurd" -- "Absurd " ++ withParensNf Arg p
 showNf NfUnit         = "⊤"
 showNf NfTT           = "tt"
 showNf (NfUnitInd p t) =
@@ -300,9 +300,9 @@ showNf (NfFunExt f g p) =
 showNe :: Ne -> String
 showNe (NeV x)     = x
 showNe (NeApp n t) = showApp n t
-showNe (NeEmptyInd p n) =
+showNe (NeAbsurd p n) =
   "absurd " ++ withParensNe Arg n
-  -- "EmptyInd " ++
+  -- "Absurd " ++
   -- withParensNf Arg p ++ " " ++
   -- withParensNe Arg n
 showNe (NeUnitInd p t n) =
@@ -372,7 +372,7 @@ alphaEqRenNf r (NfPi x a s) (NfPi y b t)
   | x == y                   = alphaEqRenNf r s t
   | otherwise                = alphaEqRenNf (insert x y r) s t
 alphaEqRenNf r NfEmpty NfEmpty = True
-alphaEqRenNf r (NfEmptyInd p) (NfEmptyInd p') = alphaEqRenNf r p p'
+alphaEqRenNf r (NfAbsurd p) (NfAbsurd p') = alphaEqRenNf r p p'
 alphaEqRenNf r NfUnit NfUnit = True
 alphaEqRenNf r NfTT NfTT = True
 alphaEqRenNf r (NfUnitInd p t) (NfUnitInd p' t') =
@@ -452,7 +452,7 @@ alphaEqRenNe r (NeUnitInd p t n) (NeUnitInd p' t' n') =
   alphaEqRenNf r p p' &&
   alphaEqRenNf r t t' &&
   alphaEqRenNe r n n'
-alphaEqRenNe r (NeEmptyInd p n) (NeEmptyInd p' n') =
+alphaEqRenNe r (NeAbsurd p n) (NeAbsurd p' n') =
   alphaEqRenNf r p p' &&
   alphaEqRenNe r n n'
 alphaEqRenNe r (NeSumInd p f g n) (NeSumInd p' f' g' n') =
@@ -496,7 +496,7 @@ renameNf x y (NfPi z a b)
   | z == x    = NfPi z (renameNf x y a) b
   | otherwise = NfPi z (renameNf x y a) (renameNf x y b)
 renameNf x y NfEmpty = NfEmpty
-renameNf x y (NfEmptyInd p) = NfEmptyInd (renameNf x y p)
+renameNf x y (NfAbsurd p) = NfAbsurd (renameNf x y p)
 renameNf x y NfUnit = NfUnit
 renameNf x y NfTT = NfTT
 renameNf x y (NfUnitInd p t) = NfUnitInd (renameNf x y p) (renameNf x y t)
@@ -541,8 +541,8 @@ renameNe x y (NeV s)
   | s == x    = NeV y
   | otherwise = NeV s
 renameNe x y (NeApp n t) = NeApp (renameNe x y n) (renameNf x y t)
-renameNe x y (NeEmptyInd p n) =
-  NeEmptyInd (renameNf x y p) (renameNe x y n)
+renameNe x y (NeAbsurd p n) =
+  NeAbsurd (renameNf x y p) (renameNe x y n)
 renameNe x y (NeUnitInd p t n) =
   NeUnitInd (renameNf x y p) (renameNf x y t) (renameNe x y n)
 renameNe x y (NeSumInd p f g n) =
@@ -567,7 +567,7 @@ freeVarsNf (NfLam x a t) =
   freeVarsNf a `Set.union` (freeVarsNf t `Set.difference` Set.singleton x)
 freeVarsNf (NfPi x a b) =
   freeVarsNf a `Set.union` (freeVarsNf b `Set.difference` Set.singleton x)
-freeVarsNf (NfEmptyInd p) = freeVarsNf p
+freeVarsNf (NfAbsurd p) = freeVarsNf p
 freeVarsNf (NfUnitInd p t) = freeVarsNf p `Set.union` freeVarsNf t
 freeVarsNf (NfSum a b) = freeVarsNf a `Set.union` freeVarsNf b
 freeVarsNf (NfInl t b) = freeVarsNf t `Set.union` freeVarsNf b
@@ -619,7 +619,7 @@ freeVarsNf _ = Set.empty
 freeVarsNe :: Ne -> Set.Set String
 freeVarsNe (NeV x)     = Set.singleton x
 freeVarsNe (NeApp n t) = freeVarsNe n `Set.union` freeVarsNf t
-freeVarsNe (NeEmptyInd p n) =
+freeVarsNe (NeAbsurd p n) =
   freeVarsNf p `Set.union` freeVarsNe n
 freeVarsNe (NeUnitInd p t n) =
   freeVarsNf p `Set.union`
@@ -652,7 +652,7 @@ boundVarsNf :: Nf -> Set.Set String
 boundVarsNf (NfNe n)      = boundVarsNe n
 boundVarsNf (NfLam x a t) = Set.singleton x `Set.union` boundVarsNf a `Set.union` boundVarsNf t
 boundVarsNf (NfPi x a b)  = Set.singleton x `Set.union` boundVarsNf a `Set.union` boundVarsNf b
-boundVarsNf (NfEmptyInd p) = boundVarsNf p
+boundVarsNf (NfAbsurd p) = boundVarsNf p
 boundVarsNf (NfUnitInd p t) = boundVarsNf p `Set.union` boundVarsNf t
 boundVarsNf (NfSum a b) = boundVarsNf a `Set.union` boundVarsNf b
 boundVarsNf (NfInl t b) = boundVarsNf t `Set.union` boundVarsNf b
@@ -702,7 +702,7 @@ boundVarsNf _ = Set.empty
 boundVarsNe :: Ne -> Set.Set String
 boundVarsNe (NeV x)     = Set.empty
 boundVarsNe (NeApp n t) = boundVarsNe n `Set.union` boundVarsNf t
-boundVarsNe (NeEmptyInd p n) =
+boundVarsNe (NeAbsurd p n) =
   boundVarsNf p `Set.union` boundVarsNe n
 boundVarsNe (NeUnitInd p t n) =
   boundVarsNf p `Set.union`
@@ -776,7 +776,7 @@ substNf x v (NfPi y a b)
   where
     fv = freeVarsNf v
     rec = substNf x v
-substNf x v (NfEmptyInd p) = NfEmptyInd (substNf x v p)
+substNf x v (NfAbsurd p) = NfAbsurd (substNf x v p)
 substNf x v (NfUnitInd p t) = NfUnitInd (substNf x v p) (substNf x v t)
 substNf x v (NfSum a b) = NfSum (substNf x v a) (substNf x v b)
 substNf x v (NfInl t b) = NfInl (substNf x v t) (substNf x v b)
@@ -882,11 +882,11 @@ substNe x v (NeApp n t) =
   let n' = substNe x v n
       t' = substNf x v t in
       apply n' t'
-substNe x v (NeEmptyInd p n) =
+substNe x v (NeAbsurd p n) =
   let p' = substNf x v p
       n' = substNe x v n in
   case n' of
-    NfNe n' -> NfNe (NeEmptyInd p' n')
+    NfNe n' -> NfNe (NeAbsurd p' n')
 substNe x v (NeUnitInd p t n) =
   let p' = substNf x v p
       t' = substNf x v t
@@ -958,7 +958,7 @@ substNe x v (NeWInd a b p f n) = evalWInd a b p f (substNe x v n)
 apply :: Nf -> Nf -> Nf
 apply (NfNe n) t = NfNe (NeApp n t)
 apply (NfLam x a s) t = substNf x t s
-apply (NfEmptyInd p) (NfNe n) = NfNe (NeEmptyInd p n)
+apply (NfAbsurd p) (NfNe n) = NfNe (NeAbsurd p n)
 apply (NfUnitInd p t) (NfNe n) = NfNe (NeUnitInd p t n)
 apply (NfUnitInd p t) NfTT = t
 apply (NfSumInd p f g) (NfNe n) = NfNe (NeSumInd p f g n)
