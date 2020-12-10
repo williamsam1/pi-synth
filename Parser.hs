@@ -474,9 +474,13 @@ desugarLam (((x:xs),Nothing):asc) b =
 desugarLam (((x:xs),Just a):asc) b =
   Lam x (Just (desugar a)) (desugarLam ((xs,Just a):asc) b)
 
+desugarAppImpl :: Term -> [Input] -> Term
+desugarAppImpl t []     = t
+desugarAppImpl t (x:xs) = desugarAppImpl (App t (desugar x)) xs
+
 desugarApp :: [Input] -> Input -> Term
 desugarApp [] y     = desugar y
-desugarApp (x:xs) y = App (desugar x) (desugarApp xs y)
+desugarApp (x:xs) y = desugarAppImpl (desugar x) (xs ++ [y])
 
 desugarTrans :: [Input] -> Input -> Term
 desugarTrans []     y = desugar y

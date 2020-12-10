@@ -29,7 +29,8 @@ data Command
   = Define String Term
   | DefineCheck String Term Term
   | Synthesize String Term
-  deriving (Eq,Show)
+  | Eval Term
+  deriving (Eq, Show)
 
 cmd :: Grammar r (Prod r String String Command)
 cmd = mdo
@@ -37,7 +38,8 @@ cmd = mdo
   defTm    <- rule $ Define <$> ident <* defEq <*> (desugar <$> e)
   defChkTm <- rule $ DefineCheck <$> ident <* doublecolon <*> (desugar <$> e) <* defEq <*> (desugar <$> e)
   synthTy  <- rule $ Synthesize <$> ident <* questioncolon <*> (desugar <$> e)
-  cmd      <- rule $ defTm <|> defChkTm <|> synthTy
+  eval     <- rule $ Eval <$> (desugar <$> e)
+  cmd      <- rule $ defTm <|> defChkTm <|> synthTy <|> eval
   return cmd
 
 data REPLError
@@ -88,40 +90,47 @@ runRepl i (env, ctx) (Synthesize x a) =
         Right (Map.insert x (t, a) env, ctx)
     Right a  -> let t = head (synthAll ctx a) in
       Right (Map.insert x (t, a) env, ctx)
+runRepl i s c = Right s
 
-repl :: Int -> [String] -> State -> Either REPLError State
-repl i []     s = Right s
-repl i (x:xs) s =
-  if all isSpace x then repl (i+1) xs s else
+runLines :: Int -> [String] -> State -> Either REPLError State
+runLines i []     s = Right s
+runLines i (x:xs) s =
+  if all isSpace x then runLines (i+1) xs s else
   do
   c <- parseCmd i x
   s <- runRepl i s c
-  repl (i+1) xs s
+  runLines (i+1) xs s
 
 runFile :: String -> Either REPLError State
-runFile contents = repl 0 (lines contents) emp
+runFile contents = runLines 0 (lines contents) emp
+
+prompt :: String -> IO String
+prompt text = do
+    putStr text
+    hFlush stdout
+    getLine
+
+repl :: Int -> State -> IO ()
+repl i s@(env, ctx) = do
+  line <- prompt "> "
+  case parseCmd i line of
+    Left err -> print err *> repl (i+1) s
+    Right (Eval t) ->
+      case infer env ctx t of
+        Left err     -> print err *> repl (i+1) s
+        Right (v, a) ->
+          putStrLn (show v ++ "\n : " ++ show a) *> repl (i+1) s
+    Right c -> case runRepl i s c of
+      Left err -> print err *> repl (i+1) s
+      Right s  -> repl (i+1) s
 
 main :: IO ()
-main = do
-  xs:_ <- getArgs
-  handle <- openFile xs ReadMode
-  contents <- hGetContents handle  
-  print (runFile contents)
-  hClose handle
+main = repl 0 emp
 
 -- main :: IO ()
 -- main = do
 --   xs:_ <- getArgs
---   print $ tokenize xs
---   (ps, r) <- return $ fullParses (parser expr) $ tokenize xs
---   mapM_ print ps
---   putStrLn ""
---   print $ parseTerm xs
---   putStrLn ""
---   print $ desugar <$> parseTerm xs
---   putStrLn ""
---   print $ infer Map.empty Map.empty <$> desugar <$> parseTerm xs
---   putStrLn ""
---   print $ check Map.empty Map.empty <$> (desugar <$> parseTerm xs) <*> (pure $ NfS (Type 0))
---   putStrLn ""
---   print $ check Map.empty Map.empty <$> (desugar <$> parseTerm xs) <*> (pure $ NfS (Type 1))
+--   handle <- openFile xs ReadMode
+--   contents <- hGetContents handle  
+--   print (runFile contents)
+--   hClose handle
